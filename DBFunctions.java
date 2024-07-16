@@ -90,26 +90,33 @@ public class DBFunctions {
 
 			//User
 			String user = "CREATE TABLE Client(uid INT, fname VARCHAR(20), lname VARCHAR(20), " +
-					"username VARCHAR(20) UNIQUE, email VARCHAR(30), password VARCHAR(15), PRIMARY KEY(uid));";
+					"username VARCHAR(20) UNIQUE, email VARCHAR(30) UNIQUE, password VARCHAR(15), PRIMARY KEY(uid));";
 			stmt.executeUpdate(user);
 
 			//Friends
 			String friends = "CREATE TABLE Friends(receiverId INT, requesterId INT, reqStatus VARCHAR(10), " +
-					"timeOfRejection TIMESTAMP DEFAULT NULL, PRIMARY KEY(receiverId, requesterId), " +
+					"timeOfRejection TIMESTAMP DEFAULT NULL, CHECK (reqStatus in ['accepted', 'requested', 'rejected'])" +
+					"PRIMARY KEY(receiverId, requesterId), " +
 					"FOREIGN KEY (receiverId) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE, " +
 					"FOREIGN KEY (requesterId) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE);";
 			stmt.executeUpdate(friends);
 
 			//HasPortfolio
-			String hasPortfolio = "CREATE TABLE HasPortfolio(pid INT, uid INT, PRIMARY KEY(pid));";
-			stmt.executeUpdate(hasPortfolio);
+//			String hasPortfolio = "CREATE TABLE HasPortfolio(pid INT, uid INT, PRIMARY KEY(pid), " +
+//					"FOREIGN KEY (pid) REFERENCES Portfolio(pid) ON DELETE SET NULL ON UPDATE CASCADE, " +
+//					"FOREIGN KEY (uid) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE);";
+//			stmt.executeUpdate(hasPortfolio);
 
 			//Portfolio
-			String portfolio = "CREATE TABLE Portfolio(pid INT, pname CHAR(20), totalCash REAL, totalPresentMarketValue REAL, PRIMARY KEY(pid, uid));";
+			String portfolio = "CREATE TABLE Portfolio(pid INT, pname CHAR(20), " +
+					"uid INT, FOREIGN KEY (uid) REFERENCES User(uid)," +
+					" PRIMARY KEY(pid));";
 			stmt.executeUpdate(portfolio);
 
 			//hasAccount
-			String hasAccount = "CREATE TABLE HasAccount(pid INT, accId INT PRIMARY KEY(pid));";
+			String hasAccount = "CREATE TABLE HasAccount(pid INT, accId INT, PRIMARY KEY(pid), " +
+					"FOREIGN KEY (pid) REFERENCES Portfolio(pid) ON DELETE SET NULL ON UPDATE CASCADE, " +
+					"FOREIGN KEY (accId) REFERENCES CashAccount(accId) ON DELETE SET NULL ON UPDATE CASCADE);";
 			stmt.executeUpdate(hasAccount);
 
 			//cashAccount
@@ -117,50 +124,72 @@ public class DBFunctions {
 			stmt.executeUpdate(cashAccount);
 
 			//leaveReviews
-			String leavesReview = "CREATE TABLE LeavesReviews(rid INT, slid INT, uid INT, PRIMARY KEY(rid));";
+			String leavesReview = "CREATE TABLE LeavesReviews(rid INT, slid INT, uid INT, PRIMARY KEY(rid)," +
+					"FOREIGN KEY (rid) REFERENCES Review(rid) ON DELETE SET NULL ON UPDATE CASCADE, " +
+					"FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE SET NULL ON UPDATE CASCADE," +
+					"FOREIGN KEY (uid) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE);";
 			stmt.executeUpdate(leavesReview);
 
 			//Review
-			String review = "CREATE TABLE Review(rid INT, uid INT, reviewText VARCHAR(100), reviewDate DATETIME, PRIMARY KEY(rid));";
+			String review = "CREATE TABLE Review(rid INT, reviewText VARCHAR(200), reviewDate TIMESTAMP, PRIMARY KEY(rid));";
 			stmt.executeUpdate(review);
 
 			//isAccessibleBy
-			String isAccessibleBy = "CREATE TABLE IsAccessibleBy(slid INT, uid INT, PRIMARY KEY(slid, uid));";
+			String isAccessibleBy = "CREATE TABLE IsAccessibleBy(slid INT, uid INT, PRIMARY KEY(slid, uid)," +
+					"FOREIGN KEY (uid) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE, " +
+					"FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE SET NULL ON UPDATE CASCADE);";
 			stmt.executeUpdate(isAccessibleBy);
 
 			//hasStockLists
-			String hasStockLists = "CREATE TABLE IsAccessibleBy(slid INT, uid INT, PRIMARY KEY(slid));";
-			stmt.executeUpdate(hasStockLists);
+//			String hasStockLists = "CREATE TABLE HasStockLists(slid INT, uid INT, PRIMARY KEY(slid)," +
+//					"FOREIGN KEY (uid) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE," +
+//					"FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE SET NULL ON UPDATE CASCADE);";
+//			stmt.executeUpdate(hasStockLists);
 
 			//stockLists
-			String stockList = "CREATE TABLE StockLists(slid INT, uid INT, visibility VARCHAR(10), slName CHAR(20), PRIMARY KEY(slid, uid));";
-			stmt.executeUpdate(stockList);
+			String stockLists = "CREATE TABLE StockLists(slid INT, visibility VARCHAR(10), slName CHAR(20), " +
+					"uid INT, PRIMARY KEY(slid), " +
+					"FOREIGN KEY (uid) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE);";
+			stmt.executeUpdate(stockLists);
 
 			//makesPurchase
-			String makesPurchase = "CREATE TABLE MakesPurchase(purchaseId INT, uid INT, PRIMARY KEY(slid, uid));";
-			stmt.executeUpdate(makesPurchase);
+//			String makesPurchase = "CREATE TABLE MakesPurchase(purchaseId INT, uid INT, PRIMARY KEY(purchaseId)," +
+//					"FOREIGN KEY (uid) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE," +
+//					"FOREIGN KEY (purchaseId) REFERENCES Purchase(purchaseId) ON DELETE SET NULL ON UPDATE CASCADE);";
+//			stmt.executeUpdate(makesPurchase);
 
 			//purchase
-			String purchase = "CREATE TABLE Purchase(purchaseid INT, timestamp TIMESTAMP, quantity INT, purchasePrice REAL, PRIMARY KEY(purchaseId));";
+			String purchase = "CREATE TABLE Purchase(purchaseId INT, timestamp TIMESTAMP, quantity INT, " +
+					"purchasePrice REAL, uid INT, symbol VARCHAR(5), PRIMARY KEY(purchaseId)" +
+					"FOREIGN KEY (uid) REFERENCES Client(uid) ON DELETE SET NULL ON UPDATE CASCADE," +
+					"FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE SET NULL ON UPDATE CASCADE);";
 			stmt.executeUpdate(purchase);
 
 			//StockHoldings
-			String stockHoldings = "CREATE TABLE StockHoldings(pid INT, symbol INT, PRIMARY KEY(pid, symbol));";
+			String stockHoldings = "CREATE TABLE StockHoldings(pid INT, symbol VARCHAR(5), PRIMARY KEY(pid, symbol)," +
+					"FOREIGN KEY (pid) REFERENCES Portfolio(pid) ON DELETE SET NULL ON UPDATE CASCADE," +
+					"FOREIGN KEY (symbol) REFERENCES StockHolding(symbol) ON DELETE SET NULL ON UPDATE CASCADE);";
 			stmt.executeUpdate(stockHoldings);
 
 
 			//StockHolding
-			String stockHolding = "CREATE TABLE StockHolding(symbol INT, sharesOwned INT, presentMarketValue REAL, PRIMARY KEY(symbol));";
+			String stockHolding = "CREATE TABLE StockHolding(symbol VARCHAR(5), sharesOwned INT, " +
+					"PRIMARY KEY(symbol), " +
+					"FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE SET NULL ON UPDATE CASCADE);";
 			stmt.executeUpdate(stockHolding);
 
 
 			//stockListItems
-			String stockListItems = "CREATE TABLE StockListItems(slid INT, symbol VARCHAR(5), PRIMARY KEY(slid, symbol));";
+			String stockListItems = "CREATE TABLE StockListItems(slid INT, symbol VARCHAR(5), PRIMARY KEY(slid, symbol)," +
+					"FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE SET NULL ON UPDATE CASCADE," +
+					"FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE SET NULL ON UPDATE CASCADE);";
 			stmt.executeUpdate(stockListItems);
 
 			//Bought
-			String bought = "CREATE TABLE Bought(purchaseId INT, symbol VARCHAR(5), PRIMARY KEY(purchaseId));";
-			stmt.executeUpdate(bought);
+//			String bought = "CREATE TABLE Bought(purchaseId INT, symbol VARCHAR(5), PRIMARY KEY(purchaseId), " +
+//					"FOREIGN KEY (purchaseId) REFERENCES Purchase(purchaseId) ON DELETE SET NULL ON UPDATE CASCADE, " +
+//					"FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE SET NULL ON UPDATE CASCADE);";
+//			stmt.executeUpdate(bought);
 
 			//Stock
 			String stock = "CREATE TABLE Stock(symbol VARCHAR(5), strikePrice REAL, stockPrice REAL, PRIMARY KEY(symbol);";
@@ -171,7 +200,8 @@ public class DBFunctions {
 			System.out.println("Current Path: " + currentPath.toString());
 			//Stocks
 			String stocks = "CREATE TABLE StockPerformance(timestamp DATE, open REAL, high REAL, low REAL, close REAL, " +
-					"volume INT, symbol VARCHAR(5), PRIMARY KEY(symbol, timestamp));";
+					"volume INT, symbol VARCHAR(5), PRIMARY KEY(symbol, timestamp), " +
+					"FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE SET NULL ON UPDATE CASCADE);";
 
 			String sqlCopyData = "COPY Stocks(timestamp, open, high, low, close, volume, symbol) FROM '" +
 					currentPath.toString() + "/data/SP500History.csv' DELIMITER ',' CSV HEADER;";
