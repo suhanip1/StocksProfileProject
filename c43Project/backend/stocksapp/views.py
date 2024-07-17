@@ -1,3 +1,4 @@
+from django.db import IntegrityError
 from django.shortcuts import render
 from rest_framework import generics
 from .serializers import UserSerializer
@@ -16,15 +17,13 @@ from .models import User
 
 class SignupView(APIView):
     def get(self, request, fname, lname, username, email, password):
-        data = {
-            'first_name': fname,
-            'last_name': lname,
-            'username': username,
-            'email': email,
-            'password': password
-        }
-        serializer = User.objects.create(first_name = fname, last_name= lname, username= username, email= email,password= password)
+        try:
+            user = User.objects.create(first_name = fname, last_name= lname, username= username, email= email,password= password)
+            user.save()
+            return Response({'message': 'User creation successful'}, status=status.HTTP_201_CREATED)
+        except IntegrityError as e:
+            return Response({'message': 'duplicate user'})
 
-        serializer.save()
 
-        return Response({'message': 'User creation successful'}, status=status.HTTP_201_CREATED)
+        
+    

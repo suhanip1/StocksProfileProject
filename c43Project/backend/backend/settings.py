@@ -37,7 +37,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'stockApp',
+    'stocksapp',
     'corsheaders', 
     'rest_framework',
 ]
@@ -80,9 +80,9 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'postgres',          # Name of the database you created
-        'USER': '',              # Your PostgreSQL username
-        'PASSWORD': '',      # Your PostgreSQL password
+        'NAME': 'test',          # Name of the database you created
+        'USER': 'postgres',              # Your PostgreSQL username
+        'PASSWORD': 'sjc43project',      # Your PostgreSQL password
         'HOST': '',           # Set to empty string for localhost
         'PORT': '5432',                # Default port for PostgreSQL
     }
