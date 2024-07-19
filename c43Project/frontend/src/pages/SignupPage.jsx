@@ -10,7 +10,7 @@ import {
   Alert,
 } from "@mui/material";
 
-const SignupPage = () => {
+function SignupPage() {
   const navigate = useNavigate();
 
   const initialFormData = {
@@ -75,18 +75,29 @@ const SignupPage = () => {
       return;
     }
 
-    const response = await fetch(
-      `${host}/user/register/${formData.first_name}/${formData.last_name}/${formData.username}/${formData.email}/${formData.password1}/`,
-      {
-        method: "GET",
-      }
-    );
+    const response = await fetch(`${host}/user/register/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: formData.username,
+        email: formData.email,
+        password: formData.password1,
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+      }),
+    });
+
     const responseData = await response.json();
 
     if (responseData.message == "duplicate user") {
-      //deal with duplicate
-    }
-    if (!response.ok) {
+      setHasError({
+        status: "error",
+        message:
+          "There already exists a user with that username or email. Sign in instead?",
+      });
+    } else if (!response.ok) {
       const error = (await response.json()).error;
 
       setHasError({
@@ -142,7 +153,7 @@ const SignupPage = () => {
           Sign Up:
         </Typography>
         <Typography variant="body2" color="textSecondary" align="center">
-          Already a member? <Link to="/login">Sign in!</Link>
+          Already a member? <Link to="/">Sign in!</Link>
         </Typography>
         <Box
           component="form"
@@ -169,6 +180,6 @@ const SignupPage = () => {
       </Box>
     </Container>
   );
-};
+}
 
 export default SignupPage;

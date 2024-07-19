@@ -8,21 +8,52 @@ import {
   Box,
   Alert,
 } from "@mui/material";
+import api from "../api";
+import { ACCESS_TOKEN, REFRESH_TOKEN } from "../constants";
 
-const LogInPage = () => {
+function LogInPage() {
   const [username, setUsername] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [hasError, setHasError] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
   const passwordRef = React.useRef(null);
   const navigate = useNavigate();
 
-  const logInRequest = async () => {
-    if (await logIn(username, password)) {
+  const logInRequest = async (e) => {
+    setLoading(true);
+    e.preventDefault;
+
+    try {
+      const data = { username, password };
+
+      const response = await fetch(`http://127.0.0.1:8000/token/`, {
+        method: "POST",
+        body: JSON.stringify(data),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const { access, refresh } = await response.json();
+
+      localStorage.setItem(ACCESS_TOKEN, access);
+      localStorage.setItem(REFRESH_TOKEN, refresh);
       navigate("/");
-    } else {
-      setHasError(true);
-      setPassword("");
+    } catch (error) {
+      alert(error);
+    } finally {
+      setLoading(false);
     }
+    // if (await logIn(username, password)) {
+    //   navigate("/home");
+    // } else {
+    //   setHasError(true);
+    //   setPassword("");
+    // }
   };
 
   const handleKeyDown = (event) => {
@@ -50,7 +81,7 @@ const LogInPage = () => {
         }}
       >
         <Typography variant="h4" component="h1" gutterBottom>
-          Log in
+          Login
         </Typography>
         <Typography variant="body2" gutterBottom>
           Not a member already? <Link to="/signup">Sign up!</Link>
@@ -88,9 +119,6 @@ const LogInPage = () => {
           {hasError && (
             <Alert severity="error">Username or password is incorrect</Alert>
           )}
-          <Link to="#">
-            <Typography variant="body2">Forgot password?</Typography>
-          </Link>
           <Button variant="contained" color="primary" onClick={logInRequest}>
             Log in
           </Button>
@@ -98,6 +126,6 @@ const LogInPage = () => {
       </Box>
     </Container>
   );
-};
+}
 
 export default LogInPage;

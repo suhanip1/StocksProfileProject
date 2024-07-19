@@ -8,21 +8,27 @@ from django.http import JsonResponse, HttpResponse
 from rest_framework.response import Response
 from rest_framework import status
 from .models import User
+from rest_framework.decorators import api_view
 
 
-# class SignupView(generics.CreateAPIView):
-#     queryset = User.objects.all()
-#     serializer_class = UserSerializer
-#     permission_classes = [AllowAny]
+class SignupView(generics.CreateAPIView):
+    permission_classes = [AllowAny]
+    def post(self, request):
+        serializer = UserSerializer(data=request.data)
 
-class SignupView(APIView):
-    def get(self, request, fname, lname, username, email, password):
-        try:
-            user = User.objects.create(first_name = fname, last_name= lname, username= username, email= email,password= password)
-            user.save()
+        if serializer.is_valid():
+            serializer.save()
+
             return Response({'message': 'User creation successful'}, status=status.HTTP_201_CREATED)
-        except IntegrityError as e:
+        else: 
             return Response({'message': 'duplicate user'})
+
+
+@api_view(['GET'])
+def get_current_user(request):
+    user_id = request.user.id
+    user_name = request.user.first_name + " " + request.user.last_name
+    return Response({"user_id": user_id, "user_name": user_name})
 
 
         
