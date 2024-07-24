@@ -4,12 +4,19 @@ from django.shortcuts import render
 from rest_framework import generics
 from .models import StockList, Stock
 from .serializers import StockListItemSerializer, StockListSerializer, UserSerializer, StockSerializer
+from .serializers import FriendsSerializer, UserSerializer
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from django.http import JsonResponse, HttpResponse
 from rest_framework.response import Response
 from rest_framework import status
+from .models import Friends
 from rest_framework.decorators import api_view
+from django.contrib.auth.models import User
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from datetime import timedelta
+from django.core.exceptions import ValidationError
 
 
 class SignupView(generics.CreateAPIView):
@@ -177,3 +184,92 @@ class StockListItemView(APIView):
         stocklistitem = [dict(zip(columns, row)) for row in rows]
         
         return Response(stocklistitem, status=status.HTTP_200_OK)
+    
+@api_view(['GET'])
+def find(request, username2):
+    user = get_object_or_404(User, username=username2)
+    serializer = UserSerializer(user)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def find_user(request, username):
+    print(username)
+    user = get_object_or_404(User, username=username)
+    serializer = UserSerializer(user)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def get_friends(request):
+    friends = Friends.objects.filter(req_status=Friends.ACCEPTED, receiver=request.user) | Friends.objects.filter(req_status=Friends.ACCEPTED, requester=request.user)
+    serializer = FriendsSerializer(friends, many=True)
+    return Response({'friends': [friend.receiver.username if friend.requester == request.user else friend.requester.username for friend in friends]}, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def get_pending_friends(request):
+    pending_requests = Friends.objects.filter(receiver=request.user, req_status=Friends.PENDING)
+    serializer = FriendsSerializer(pending_requests, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def get_our_pending_requests(request):
+    sent_requests = Friends.objects.filter(requester=request.user, req_status=Friends.PENDING)
+    serializer = FriendsSerializer(sent_requests, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+def send_friend_request(request, username):
+    print(username)
+    requester = request.user
+    receiver = get_object_or_404(User, username=username)
+
+   
+    if receiver == requester:
+        return Response({'message': 'You cannot friend yourself.'})
+        
+    try:
+        friends = Friends(receiver=receiver, requester=requester)
+        friends.clean() 
+        friends.save()
+        return Response({'message': 'Friend request sent successfully.'}, status=status.HTTP_201_CREATED)
+    except (ValidationError, IntegrityError) as e:
+        friends = Friends.objects.filter(receiver=requester, requester=receiver)
+        if not friends.exists():
+             friends = Friends.objects.filter(receiver=receiver, requester=requester)
+        if friends.exists() and friends.first().req_status == Friends.PENDING:
+            return Response({'message': 'Duplicate friend request.'})
+        if friends.exists() and friends.first().req_status == Friends.REJECTED:
+            friends = friends.first()
+            time_remaining = (friends.time_of_rejection + timedelta(minutes=5)) - timezone.now()
+            minutes_remaining = time_remaining.total_seconds() // 60
+            if timezone.now() >= friends.time_of_rejection + timedelta(minutes=5):
+                friends.req_status = Friends.PENDING
+                print(friends.req_status)
+                friends.time_of_rejection = None
+                friends.save()
+                return Response({'message': 'Friend request sent successfully.'}, status=status.HTTP_201_CREATED)
+            return Response({'message': f'Please wait {int(minutes_remaining)} minutes.'})
+        return Response({'message': 'Duplicate friend request.'})
+
+@api_view(['PUT'])
+def remove_friend(request, username):
+    friend = Friends.objects.filter(receiver=request.user, requester__username=username) | Friends.objects.filter(receiver__username=username, requester=request.user)
+    friend = friend.first()
+    if friend:
+        friend.req_status = friend.REJECTED
+        friend.time_of_rejection = timezone.now()
+        friend.save()
+        return Response({'message': 'Friend removed successfully.'}, status=status.HTTP_200_OK)
+    return Response({'message': 'Friend not found.'})
+
+@api_view(['PUT'])
+def accept_friend_request(request, username):
+    friend_request = get_object_or_404(Friends, receiver=request.user, requester__username=username, req_status=Friends.PENDING)
+    friend_request.req_status = Friends.ACCEPTED
+    friend_request.save()
+    return Response({'message': 'Friend request accepted.'}, status=status.HTTP_200_OK)
+
+@api_view(['PUT'])
+def remove_sent_request(request, username):
+    friend_request = get_object_or_404(Friends, requester=request.user, receiver__username=username, req_status=Friends.PENDING)
+    friend_request.delete()
+    return Response({'message': 'Friend request removed.'}, status=status.HTTP_200_OK)

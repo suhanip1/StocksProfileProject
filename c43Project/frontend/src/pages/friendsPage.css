@@ -1,0 +1,26 @@
+body {
+    font-family: monospace;
+    background-color: black;
+    color: white;
+  }
+  
+h2{
+    color: white;
+}
+
+input{ 
+    padding: 5px;
+    font-size: '16px';
+    border-radius: 10px;
+    font-family:  monospace;
+
+}
+button{
+    background-color: white;
+    border-radius: 10px;
+    padding: 5px 10px;
+    font-size: 16px;
+    font-family: monospace;
+    align-self: center;
+    height: 30px;
+}

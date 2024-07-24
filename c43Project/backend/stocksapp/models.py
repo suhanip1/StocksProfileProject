@@ -1,4 +1,36 @@
 from django.db import models
+from django.conf import settings
+from django.core.exceptions import ValidationError
+
+class Friends(models.Model):
+    PENDING = "Pending"
+    ACCEPTED = "Accepted"
+    REJECTED = "Rejected"
+    STATUS_CHOICES = [
+        (PENDING, 'Pending'),
+        (ACCEPTED, 'Accepted'),
+        (REJECTED, 'Rejected'),
+    ]
+    
+    receiver = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='receiver', on_delete=models.CASCADE)
+    requester = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='sender', on_delete=models.CASCADE)
+    req_status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
+    time_of_rejection = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('receiver', 'requester')
+        constraints = [
+            models.UniqueConstraint(fields=['receiver', 'requester'], name='unique_friendship')
+        ]
+
+    def clean(self):
+        if Friends.objects.filter(receiver=self.requester, requester=self.receiver).exists():
+            raise ValidationError('Friendship in the opposite direction already exists.')
+        super().clean()
+
+class Bank_account(models.Model):
+    uid = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    balance = models.DecimalField(max_digits=10, decimal_places=2)
 from django.contrib.auth.models import User
 
 # Create your models here.
@@ -60,6 +92,7 @@ class StockListItem(models.Model):
         unique_together = ('slid', 'symbol')
 
     def __str__(self):
+        return f'Bank account of {self.uid} with balance {self.balance}'
         return f"{self.slid} - {self.symbol}"
 
 class IsAccessibleBy(models.Model):

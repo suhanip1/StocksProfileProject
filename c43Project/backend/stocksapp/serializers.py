@@ -2,6 +2,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.models import User
+from .models import Friends
 from .models import Stock, StockPerformance, StockList, StockListItem,IsAccessibleBy
 
 
@@ -69,3 +70,10 @@ class IsAccessibleBySerializer(serializers.ModelSerializer):
         model = IsAccessibleBy
         fields = ['slid', 'user']
     
+class FriendsSerializer(serializers.ModelSerializer):
+    requester_username = serializers.CharField(source='requester.username', read_only=True)
+    receiver_username = serializers.CharField(source='receiver.username', read_only=True)
+
+    class Meta:
+        model = Friends
+        fields = ['id', 'receiver', 'requester', 'req_status', 'time_of_rejection', 'requester_username', 'receiver_username']

@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import LogInPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
+import FriendsPage from "./pages/friendsPage";
 import StockList from "./pages/StockList";
 import SearchStock from "./pages/SearchStocks";
 import {
@@ -38,6 +39,22 @@ function RegisterAndLogout() {
 function App() {
   return (
     <>
+      <Router>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <HomePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/login" element={<LogInPage />} />
+          <Route path="/logout" element={<Logout />} />
+          <Route path="/signup" element={<RegisterAndLogout />} />
+          <Route path="/friends" element={<FriendsPage />} />
+        </Routes>
+      </Router>
       <ThemeProvider theme={darkTheme}>
         <CssBaseline />
         <Router>

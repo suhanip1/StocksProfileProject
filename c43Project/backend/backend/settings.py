@@ -65,6 +65,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.common.CommonMiddleware',
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -94,10 +95,10 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'c43',          # Name of the database you created
-        'USER': 'postgres',              # Your PostgreSQL username
-        'PASSWORD': 'sjc43project',      # Your PostgreSQL password
-        'HOST': '',           # Set to empty string for localhost
+        'NAME': 'c43datab',          # Name of the database you created
+        'USER': 'suhani',              # Your PostgreSQL username
+        'PASSWORD': 'password',      # Your PostgreSQL password
+        'HOST': 'localhost',           # Set to empty string for localhost
         'PORT': '5432',                # Default port for PostgreSQL
     }
 }
@@ -147,4 +148,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
+     'http://127.0.0.1:5173',
 ]
+CORS_ALLOW_ALL_ORIGINS = True
