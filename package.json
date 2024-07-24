@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@mui/material": "^5.16.4",
+    "chart.js": "^4.4.3"
+  }
+}

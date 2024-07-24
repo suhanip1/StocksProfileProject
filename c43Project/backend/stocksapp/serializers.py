@@ -2,6 +2,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.models import User
+from .models import Stock, StockPerformance, StockList, StockListItem,IsAccessibleBy
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -33,4 +34,38 @@ class UserSerializer(serializers.ModelSerializer):
         return value
     
 
+class StockSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Stock
+        fields = ['symbol', 'strike_price']
+
+class StockPerformanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockPerformance
+        fields = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'symbol']
+
+
+class StockListSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)  # Nested serializer for User
+
+    class Meta:
+        model = StockList
+        fields = ['slid', 'visibility', 'sl_name', 'user']
+        
+
+class StockListItemSerializer(serializers.ModelSerializer):
+    slid = StockListSerializer(read_only=True)  # Nested serializer for StockList
+    symbol = StockSerializer(read_only=True)    # Nested serializer for Stock
+
+    class Meta:
+        model = StockListItem
+        fields = ['slid', 'symbol', 'shares']
+
+class IsAccessibleBySerializer(serializers.ModelSerializer):
+    slid = StockListSerializer(read_only=True)  # Nested serializer for StockList
+    user = UserSerializer(read_only=True)        # Nested serializer for User
+
+    class Meta:
+        model = IsAccessibleBy
+        fields = ['slid', 'user']
     

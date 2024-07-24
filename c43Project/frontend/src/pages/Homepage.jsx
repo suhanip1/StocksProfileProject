@@ -1,10 +1,12 @@
 import React from "react";
 import { Box, Button, Stack, Typography } from "@mui/material";
 import api from "../api";
+import { useNavigate } from "react-router-dom";
 
 function HomePage() {
   const [userId, setUserId] = React.useState(-1);
   const [userName, setUserName] = React.useState("");
+  const navigate = useNavigate();
 
   React.useEffect(() => {
     getAndSetUser();
@@ -20,12 +22,12 @@ function HomePage() {
 
   const handlePortfolio = () => {
     console.log("Go to Portfolios List");
-    // navigate("/Portfolios");
+    // navigate("/Portfolio");
   };
 
   const handleStockLists = () => {
     console.log("Go to StockList Lists");
-    // navigate("/StockLists");
+    navigate("/StockLists");
   };
 
   const handleSharedStockLists = () => {
@@ -33,9 +35,19 @@ function HomePage() {
     // navigate("/StockLists");
   };
 
+  const handleStocks = () => {
+    console.log("Stocks");
+    navigate("/stocks");
+  };
+
   const handleFriends = () => {
     console.log("Go to Friends Lists");
     // navigate("/FriendsList");
+  };
+
+  const handleLogout = () => {
+    console.log("Logout");
+    navigate("/logout");
   };
 
   return (
@@ -77,9 +89,25 @@ function HomePage() {
           variant="contained"
           size="large"
           sx={{ fontSize: "1.5rem" }}
+          onClick={handleStocks}
+        >
+          Search For Stocks
+        </Button>
+        <Button
+          variant="contained"
+          size="large"
+          sx={{ fontSize: "1.5rem" }}
           onClick={handleFriends}
         >
           Friends
+        </Button>
+        <Button
+          variant="contained"
+          size="large"
+          sx={{ fontSize: "1.5rem" }}
+          onClick={handleLogout}
+        >
+          Logout
         </Button>
       </Stack>
     </Box>
