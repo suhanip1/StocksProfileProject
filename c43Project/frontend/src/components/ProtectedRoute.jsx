@@ -12,14 +12,14 @@ function ProtectedRoute({ children }) {
   }, []);
 
   const refreshToken = async () => {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN);
+    const refreshToken = sessionStorage.getItem(REFRESH_TOKEN);
     try {
       //get a new access token
       const res = await api.post("/stocksapp/token/refresh/", {
         refresh: refreshToken,
       });
       if (res.status === 200) {
-        localStorage.setItem(ACCESS_TOKEN, res.data.access);
+        sessionStorage.setItem(ACCESS_TOKEN, res.data.access);
         setIsAuthorized(true);
       } else {
         setIsAuthorized(false);
@@ -32,7 +32,7 @@ function ProtectedRoute({ children }) {
 
   const auth = async () => {
     //check if we have token
-    const token = localStorage.getItem(ACCESS_TOKEN);
+    const token = sessionStorage.getItem(ACCESS_TOKEN);
     if (!token) {
       setIsAuthorized(false);
       return;

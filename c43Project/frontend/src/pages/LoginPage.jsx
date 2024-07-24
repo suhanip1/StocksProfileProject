@@ -40,20 +40,14 @@ function LogInPage() {
 
       const { access, refresh } = await response.json();
 
-      localStorage.setItem(ACCESS_TOKEN, access);
-      localStorage.setItem(REFRESH_TOKEN, refresh);
+      sessionStorage.setItem(ACCESS_TOKEN, access);
+      sessionStorage.setItem(REFRESH_TOKEN, refresh);
       navigate("/");
     } catch (error) {
       alert(error);
     } finally {
       setLoading(false);
     }
-    // if (await logIn(username, password)) {
-    //   navigate("/home");
-    // } else {
-    //   setHasError(true);
-    //   setPassword("");
-    // }
   };
 
   const handleKeyDown = (event) => {
