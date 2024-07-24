@@ -77,10 +77,10 @@ function StockList() {
       </Stack>
 
       {stocklistItems.map((item) => (
-        <Card sx={{ minWidth: 270 }} key={item.slid_id}>
+        <Card sx={{ minWidth: 500 }} key={item.slid_id}>
           <CardActionArea
             onClick={() => {
-              handleStockNavigation(stock.symbol, stock.strike_price);
+              handleStockNavigation(item.symbol_id, item.strike_price);
             }}
           >
             <Stack
@@ -88,15 +88,27 @@ function StockList() {
               sx={{
                 color: "white",
                 display: "flex",
-                justifyContent: "space-between",
+                justifyContent: "space-around",
                 alignItems: "center",
               }}
             >
-              <Typography sx={{ fontSize: "1rem", paddingLeft: "20px" }}>
-                {item.symbol_id}
-              </Typography>
-              <Typography sx={{ fontSize: "1rem", paddingLeft: "20px" }}>
-                {item.shares}
+              <Stack spacing={0.5}>
+                <Typography
+                  sx={{
+                    fontFamily: "monospace",
+                    fontWeight: "bold",
+                    fontSize: "1.5rem",
+                  }}
+                >
+                  {item.symbol_id}
+                </Typography>
+                <Typography sx={{ fontSize: "1rem", fontFamily: "monospace" }}>
+                  Current price: {item.strike_price}
+                </Typography>
+              </Stack>
+              <Typography sx={{ fontSize: "1rem", fontFamily: "monospace" }}>
+                {" "}
+                Shares: {item.shares}
               </Typography>
             </Stack>
           </CardActionArea>
