@@ -163,8 +163,14 @@ class StockListItemView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, slid):
+        ### get all the information from stocklistitem and strikeprice of the symbol
         with connection.cursor() as cursor:
-            cursor.execute("SELECT * FROM stocksapp_stocklistitem WHERE slid_id = %s", [slid])
+            cursor.execute("""
+                SELECT sli.slid_id, sli.symbol_id, sli.shares, s.strike_price
+                FROM stocksapp_stocklistitem sli
+                JOIN stocksapp_stock s ON sli.symbol_id = s.symbol
+                WHERE sli.slid_id = %s
+            """, [slid])
             rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description]
         

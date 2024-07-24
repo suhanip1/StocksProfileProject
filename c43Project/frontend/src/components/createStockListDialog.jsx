@@ -19,9 +19,17 @@ import {
 import api from "../api";
 import host from "../utils/links";
 
-function CreateStockList({ open, handleClose, create = true, slid = null }) {
-  const [slname, setSlname] = React.useState("");
-  const [visibility, setVisibility] = React.useState("private");
+function CreateStockList({
+  open,
+  handleClose,
+  create = true,
+  slid = null,
+  sl_name = "",
+  prev_visibility = "private",
+  onSave,
+}) {
+  const [slname, setSlname] = React.useState(sl_name);
+  const [visibility, setVisibility] = React.useState(prev_visibility);
   const [message, setMessage] = React.useState("");
   const [openSnackbar, setOpenSnackbar] = React.useState(false);
   const [snackSeverity, setSnackSeverity] = React.useState("success");
@@ -30,6 +38,11 @@ function CreateStockList({ open, handleClose, create = true, slid = null }) {
   React.useEffect(() => {
     getAndSetUser();
   }, []);
+
+  React.useEffect(() => {
+    setSlname(sl_name);
+    setVisibility(prev_visibility);
+  }, [create, sl_name, prev_visibility]);
 
   const getAndSetUser = async () => {
     const response = await api.get("/user/get-curr-user/", {
@@ -53,6 +66,7 @@ function CreateStockList({ open, handleClose, create = true, slid = null }) {
       console.log(
         `created a stock list with name ${slname} and it is set to ${visibility}`
       );
+      if (onSave) onSave();
     } catch (error) {
       console.error("Error creating stock list:", error);
     }
@@ -62,7 +76,7 @@ function CreateStockList({ open, handleClose, create = true, slid = null }) {
   };
 
   const editSl = async (slid) => {
-    console.log("hi");
+    console.log(slid);
     try {
       const response = await api.put(
         `/stocklists/edit/${slid}/${visibility}/${slname}`
@@ -70,12 +84,16 @@ function CreateStockList({ open, handleClose, create = true, slid = null }) {
       console.log(
         `edited a stock list with name ${slname} and it is set to ${visibility}`
       );
+      setMessage(`Successfully edited a stock list!`);
+      setSnackSeverity("success");
+      setOpenSnackbar(true);
+      if (onSave) onSave();
     } catch (error) {
       console.error("Error editing stock list:", error);
+      setMessage(`Error editing a stock list!`);
+      setSnackSeverity("error");
+      setOpenSnackbar(true);
     }
-    setMessage(`Successfully edited a stock list!`);
-    setSnackSeverity("success");
-    setOpenSnackbar(true);
   };
 
   const handleSubmit = (slid) => {
@@ -120,9 +138,10 @@ function CreateStockList({ open, handleClose, create = true, slid = null }) {
                 }}
               />
             </FormControl>
+            <DialogContentText> Stock List Privacy: </DialogContentText>
             <FormControl sx={{ m: 1, minWidth: 120 }}>
               <Select
-                defaultValue="private"
+                defaultValue={"private"}
                 value={visibility}
                 onChange={handleChange}
                 displayEmpty
