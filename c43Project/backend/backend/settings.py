@@ -95,6 +95,10 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
+        #'NAME': 'c43',          # Name of the database you created
+        #'USER': 'postgres',              # Your PostgreSQL username
+        #'PASSWORD': 'sjc43project',      # Your PostgreSQL password
+        #'HOST': '',           # Set to empty string for localhost
         'NAME': 'c43datab',          # Name of the database you created
         'USER': 'suhani',              # Your PostgreSQL username
         'PASSWORD': 'password',      # Your PostgreSQL password

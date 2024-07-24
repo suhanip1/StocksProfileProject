@@ -1,7 +1,6 @@
 import React, { useEffect } from "react";
 import LogInPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
-import FriendsPage from "./pages/friendsPage";
 import StockList from "./pages/StockList";
 import SearchStock from "./pages/SearchStocks";
 import {
@@ -18,6 +17,7 @@ import CssBaseline from "@mui/material/CssBaseline";
 import StockGraph from "./components/stockGraph";
 import StockLists from "./pages/StockLists";
 import Stock from "./pages/Stock";
+import FriendsPage from "./pages/friendsPage";
 
 const darkTheme = createTheme({
   palette: {
@@ -39,22 +39,6 @@ function RegisterAndLogout() {
 function App() {
   return (
     <>
-      <Router>
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <HomePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/login" element={<LogInPage />} />
-          <Route path="/logout" element={<Logout />} />
-          <Route path="/signup" element={<RegisterAndLogout />} />
-          <Route path="/friends" element={<FriendsPage />} />
-        </Routes>
-      </Router>
       <ThemeProvider theme={darkTheme}>
         <CssBaseline />
         <Router>
@@ -100,6 +84,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Stock />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/friends"
+              element={
+                <ProtectedRoute>
+                  <FriendsPage/>
                 </ProtectedRoute>
               }
             />
