@@ -1,20 +1,38 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.conf import settings
+from django.core.exceptions import ValidationError
 
-# Create your models here.
-# class User(models.Model):
-#         #CREATE TABLE Client(uid INT, fname VARCHAR(20), lname VARCHAR(20), username VARCHAR(20) UNIQUE, email VARCHAR(30) UNIQUE, password VARCHAR(15), dateJoined TIMESTAMP, PRIMARY KEY(uid));"
-#     id = models.AutoField(primary_key=True)
-#     first_name = models.CharField(max_length=20)
-#     last_name = models.CharField(max_length=20)
-#     username = models.CharField(max_length=20, unique=True)
-#     email = models.EmailField(max_length=30, unique=True)
-#     password = models.CharField(max_length=15)
+class Friends(models.Model):
+    PENDING = "Pending"
+    ACCEPTED = "Accepted"
+    REJECTED = "Rejected"
+    STATUS_CHOICES = [
+        (PENDING, 'Pending'),
+        (ACCEPTED, 'Accepted'),
+        (REJECTED, 'Rejected'),
+    ]
+    
+    receiver = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='receiver', on_delete=models.CASCADE)
+    requester = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='sender', on_delete=models.CASCADE)
+    req_status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
+    time_of_rejection = models.DateTimeField(null=True, blank=True)
 
-#     REQUIRED_FIELDS = ['email', 'first_name', 'last_name', 'username', 'password']
+    class Meta:
+        unique_together = ('receiver', 'requester')
+        constraints = [
+            models.UniqueConstraint(fields=['receiver', 'requester'], name='unique_friendship')
+        ]
 
-#     def __str__(self):
-#         return self.username
+    def clean(self):
+        if Friends.objects.filter(receiver=self.requester, requester=self.receiver).exists():
+            raise ValidationError('Friendship in the opposite direction already exists.')
+        super().clean()
+
+class Bank_account(models.Model):
+    uid = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    balance = models.DecimalField(max_digits=10, decimal_places=2)
+from django.contrib.auth.models import User
 
 class Stock(models.Model):
     # CREATE TABLE Stock(symbol VARCHAR(5), strikePrice REAL, PRIMARY KEY(symbol);

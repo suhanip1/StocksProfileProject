@@ -94,7 +94,7 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'c43',          # Name of the database you created
+        'NAME': 'c43project',          # Name of the database you created
         'USER': 'postgres',              # Your PostgreSQL username
         'PASSWORD': 'sjc43project',      # Your PostgreSQL password
         'HOST': '',           # Set to empty string for localhost
@@ -147,4 +147,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
+     'http://127.0.0.1:5173',
 ]
+CORS_ALLOW_ALL_ORIGINS = True

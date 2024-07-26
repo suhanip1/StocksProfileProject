@@ -42,7 +42,7 @@ function HomePage() {
 
   const handleFriends = () => {
     console.log("Go to Friends Lists");
-    // navigate("/FriendsList");
+    navigate("/friends");
   };
 
   const handleLogout = () => {

@@ -17,6 +17,7 @@ import CssBaseline from "@mui/material/CssBaseline";
 import StockGraph from "./components/stockGraph";
 import StockLists from "./pages/StockLists";
 import Stock from "./pages/Stock";
+import FriendsPage from "./pages/friendsPage";
 
 const darkTheme = createTheme({
   palette: {
@@ -83,6 +84,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Stock />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/friends"
+              element={
+                <ProtectedRoute>
+                  <FriendsPage />
                 </ProtectedRoute>
               }
             />
