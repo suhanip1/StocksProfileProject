@@ -1,6 +1,10 @@
 import React from "react";
 import { Box, Container, Stack, Typography } from "@mui/material";
+import {
+  Button,
+} from '@mui/material';
 import { useState, useEffect } from "react";
+import { useNavigate } from 'react-router-dom';
 import "./friendsPage.css";
 import api from "../api";
 const FriendsPage = () => {
@@ -9,6 +13,7 @@ const FriendsPage = () => {
   const [pendingList, setPendingList] = useState([]);
   const [ourPendingList, setOurPendingList] = useState([]);
   const [user, setUser] = useState(null);
+  const navigate = useNavigate();
   const handleInputChange = (event) => {
     setFriendName(event.target.value);
   };
@@ -26,6 +31,11 @@ const FriendsPage = () => {
       return null;
     }
   };
+
+  const handleHome = () => {
+    navigate("/");
+  };
+
 
   const handleSubmit = async () => {
     try {
@@ -93,9 +103,14 @@ const FriendsPage = () => {
     getPendingReqs();
     getOurPendingReqs();
   }, []);
+  
 
   return (
     <div>
+      <Button style={{marginLeft: "20px",}} 
+      variant="outlined" onClick={handleHome}>
+        Back to Home
+      </Button>
       <div
         style={{
           display: "flex",

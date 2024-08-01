@@ -32,7 +32,7 @@ function HomePage() {
 
   const handleSharedStockLists = () => {
     console.log("Go to Shared StockList Lists");
-    // navigate("/StockLists");
+    navigate("/SharedStockLists");
   };
 
   const handleStocks = () => {
@@ -49,6 +49,10 @@ function HomePage() {
     console.log("Logout");
     navigate("/logout");
   };
+
+  const handlePublicStocks = () => {
+    navigate("/PublicStockLists");
+  }
 
   return (
     <Box
@@ -100,6 +104,14 @@ function HomePage() {
           onClick={handleFriends}
         >
           Friends
+        </Button>
+        <Button
+          variant="contained"
+          size="large"
+          sx={{ fontSize: "1.5rem" }}
+          onClick={handlePublicStocks}
+        >
+          View Public Stocks
         </Button>
         <Button
           variant="contained"

@@ -62,12 +62,12 @@ class StockPerformance(models.Model):
 
 class StockList(models.Model):
     slid = models.AutoField(primary_key=True)
-    visibility = models.CharField(max_length=10, choices=[('private', 'Private'), ('public', 'Public')], default='private')
+    visibility = models.CharField(max_length=10, choices=[('private', 'Private'), ('public', 'Public'), ('shared', 'Shared')], default='private')
     sl_name = models.CharField(max_length=20)
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
 
     def __str__(self):
-        return self.slname
+        return f"{self.slid}"
 
 class StockListItem(models.Model):
     slid = models.ForeignKey(StockList, on_delete=models.SET_NULL, null=True)
@@ -80,9 +80,22 @@ class StockListItem(models.Model):
     def __str__(self):
         return f"{self.slid} - {self.symbol}"
 
-class IsAccessibleBy(models.Model):
+
+class StockListAccessibleBy(models.Model):
+    # create table StockListAccessibleBy()
     slid = models.ForeignKey(StockList, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-
     class Meta:
         unique_together = ('slid', 'user')
+
+class Review(models.Model):
+    slid = models.ForeignKey(StockList, on_delete=models.CASCADE)
+    uid = models.ForeignKey(User, on_delete=models.CASCADE)
+    reviewText = models.TextField(max_length=4000)
+    reviewDate = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('slid', 'uid')
+
+    def __str__(self):
+        return f"Review by {self.uid} on {self.slid}"

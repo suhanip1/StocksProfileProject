@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Box,
   Button,
   Stack,
   Typography,
@@ -15,11 +16,11 @@ import api from "../api";
 import { useNavigate } from "react-router-dom";
 import CreateStockList from "../components/createStockListDialog";
 import ShareDialog from "../components/ShareDialog";
-import RatingsDialog from "../components/RatingsDialog";
+import ReviewDialog from "../components/ReviewDialog";
 import AddCircleIcon from "@mui/icons-material/AddCircle";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 
-function StockLists() {
+function SharedStockListPage() {
   const [openDialog, setOpenDialog] = React.useState(false);
   const [create, setCreate] = React.useState(null);
   const [slid, setSlid] = React.useState(null);
@@ -30,8 +31,9 @@ function StockLists() {
   const [openSnackbar, setOpenSnackbar] = React.useState(false);
   const [snackSeverity, setSnackSeverity] = React.useState("success");
   const [openShareDialog, setOpenShareDialog] = React.useState(false);
+  const [openReviewDialog, setOpenReviewDialog] = React.useState(false);
   const [currentStockList, setCurrentStockList] = React.useState(null);
-  const [openRatingsDialog, setOpenRatingsDialog] = React.useState(false);
+  const [currentReview, setCurrentReview] = React.useState(null);
   const navigate = useNavigate();
   const [stockLists, setStockLists] = React.useState([]);
 
@@ -41,18 +43,16 @@ function StockLists() {
 
   const getStockLists = async () => {
     try {
-      const response = await api.get("/stocklists/", {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      setStockLists(response.data);
+      const res = await api.get("getSharedStockList/");
+      console.log(res.data);
+      setStockLists(res.data);
     } catch (error) {
       console.error("Error fetching stock lists:", error.response.data);
     }
   };
 
   const handleHome = () => {
+    console.log("Go back to Home Page");
     navigate("/");
   };
 
@@ -68,6 +68,7 @@ function StockLists() {
   };
 
   const deleteStockList = async (id) => {
+    console.log("delete");
     try {
       await api.delete(`/stocklists/delete/${id}/`);
       setMessage("The Stock List was successfully deleted");
@@ -75,6 +76,7 @@ function StockLists() {
       setOpenSnackbar(true);
       setAnchorElUser(null);
     } catch (error) {
+      console.log(error);
       setMessage("There was an error when trying to delete the stock list");
       setSnackSeverity("error");
       setOpenSnackbar(true);
@@ -108,19 +110,37 @@ function StockLists() {
     setOpenShareDialog(false);
   };
 
-  const handleShareAction = (email) => {
-    console.log(`Sharing stock list ${currentStockList.sl_name} with email ${email}`);
-    setOpenShareDialog(false); 
+  const handleShareAction = (username) => {
+    console.log(`Sharing stock list ${currentStockList.sl_name} with username ${username}`);
+    setOpenShareDialog(false);
   };
 
-  const handleSeeRatings = (stockList) => {
+  const handleReview = async (stockList) => {
     setCurrentStockList(stockList);
-    setOpenRatingsDialog(true);
+    try {
+      const res = await api.get(`getReview/${stockList.slid}/`);
+      if (res.data) {
+        setCurrentReview(res.data);
+      }
+    } catch (error) {
+      console.error("Error fetching review:", error.response.data);
+    }
+    setOpenReviewDialog(true);
   };
 
-  const handleRatingsDialogClose = () => {
-    console.log("JJJJJJJJJJJJJJJ")
-    setOpenRatingsDialog(false);
+  const handleReviewDialogClose = () => {
+    setOpenReviewDialog(false);
+  };
+
+  const handleReviewAction = (stockList, reviewText) => {
+    console.log(`Reviewing stock list ${stockList.sl_name} with text: ${reviewText}`);
+    setOpenReviewDialog(false);
+    getStockLists(); // Refresh the list after review
+  };
+
+  const handleDeleteReview = (stockList) => {
+    console.log(`Deleting review for stock list ${stockList.sl_name}`);
+    getStockLists(); // Refresh the list after review deletion
   };
 
   return (
@@ -132,7 +152,7 @@ function StockLists() {
         justifyContent: "center",
         alignItems: "center",
       }}
-    >
+    > 
       <Button variant="outlined" onClick={handleHome}>
         Back to Home
       </Button>
@@ -146,14 +166,7 @@ function StockLists() {
         }}
         direction="row"
       >
-        <Typography sx={{ fontSize: "2rem" }}>My Stock Lists</Typography>
-        <IconButton
-          aria-label="Create Stock List"
-          size="large"
-          onClick={() => openStockListDialog(true)}
-        >
-          <AddCircleIcon color="primary" />
-        </IconButton>
+      <h2> Shared Stock List</h2>
       </Stack>
       {stockLists.map((item) => (
         <Card sx={{ minWidth: 270 }} key={item.slid}>
@@ -212,50 +225,26 @@ function StockLists() {
               open={Boolean(anchorElUser)}
               onClose={handleCloseUserMenu}
             >
-              <MenuItem key={"Edit"} onClick={() => openStockListDialog(false)}>
-                <Typography textAlign="center">{"Edit"}</Typography>
-              </MenuItem>
-              <MenuItem key={"Delete"} onClick={() => deleteStockList(slid)}>
-                <Typography textAlign="center">{"Delete"}</Typography>
-              </MenuItem>
-              <MenuItem key={"Share"} onClick={() => handleShare(item)}>
-                <Typography textAlign="center">{"Share"}</Typography>
-              </MenuItem>
-              <MenuItem key={"See Ratings"} onClick={() => handleSeeRatings(item)}>
-                <Typography textAlign="center">{"See Ratings"}</Typography>
+              <MenuItem key={"Leave Review"} onClick={() => handleReview(item)}>
+                <Typography textAlign="center">{"Leave Review"}</Typography>
               </MenuItem>
             </Menu>
           </Stack>
         </Card>
       ))}
-      {create ? (
-        <CreateStockList
-          open={openDialog}
-          handleClose={handleClose}
-          onSave={handleSave}
-        />
-      ) : (
-        <CreateStockList
-          open={openDialog}
-          handleClose={handleClose}
-          create={false}
-          slid={slid}
-          sl_name={sl_name}
-          prev_visibility={visibility}
-          onSave={handleSave}
-        />
-      )}
       <ShareDialog
         open={openShareDialog}
         onClose={handleShareDialogClose}
         stockList={currentStockList}
         onShare={handleShareAction}
       />
-      <RatingsDialog
-        open={openRatingsDialog}
-        onClose={handleRatingsDialogClose}
+      <ReviewDialog
+        open={openReviewDialog}
+        onClose={handleReviewDialogClose}
         stockList={currentStockList}
-        bool={true}
+        review={currentReview}
+        onReview={handleReviewAction}
+        onDelete={handleDeleteReview}
       />
       <Snackbar
         autoHideDuration={6000}
@@ -271,4 +260,4 @@ function StockLists() {
   );
 }
 
-export default StockLists;
+export default SharedStockListPage;

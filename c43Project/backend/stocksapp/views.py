@@ -2,21 +2,20 @@ from datetime import datetime
 from django.db import IntegrityError, connection
 from django.shortcuts import render
 from rest_framework import generics
-from .models import StockList, Stock
-from .serializers import StockListItemSerializer, StockListSerializer, UserSerializer, StockSerializer
-from .serializers import FriendsSerializer, UserSerializer
+from .models import StockList, Stock, StockListAccessibleBy, Friends, Review
+from .serializers import StockListItemSerializer, StockListSerializer, UserSerializer, StockSerializer, ReviewSerializer
+from .serializers import FriendsSerializer, StockListAccessibleBySerializer 
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from django.http import JsonResponse, HttpResponse
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Friends
 from rest_framework.decorators import api_view
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, ObjectDoesNotExist
 
 
 class SignupView(generics.CreateAPIView):
@@ -39,6 +38,12 @@ def get_current_user(request):
     return Response({"user_id": user_id, "user_name": user_name})
 
 @api_view(['GET'])
+def get_current_username(request):
+    username = request.user.username
+    return Response({"username": username})
+
+
+@api_view(['GET'])
 def find(request):
     username = request.GET.get('username')
     user = get_object_or_404(User, username=username)
@@ -47,7 +52,6 @@ def find(request):
 
 @api_view(['GET'])
 def find_user(request, username):
-    print(username)
     user = get_object_or_404(User, username=username)
     serializer = UserSerializer(user)
     return Response(serializer.data, status=status.HTTP_200_OK)
@@ -274,3 +278,153 @@ class StockListItemView(APIView):
         stocklistitem = [dict(zip(columns, row)) for row in rows]
         
         return Response(stocklistitem, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+def create_stock_list_accessibility(request,slid,friend_username):
+
+    if request.user.username == friend_username:
+         return JsonResponse({"message": "cannot friend yourself"})
+
+    try:
+        friend = User.objects.get(username=friend_username)
+        slid = StockList.objects.get(slid=slid)
+
+        relationship, created = StockListAccessibleBy.objects.get_or_create(
+            slid = slid,
+            user = friend
+        )
+
+        if created:
+            slid.visibility = "Shared"
+            slid.save()
+            return JsonResponse({"message": "shared stock list"}, status=201)
+        else:
+            return JsonResponse({"message": "already shared with this user"}, status=200)
+
+    except User.DoesNotExist:
+        return JsonResponse({"message": "user does not exist"})
+
+
+@api_view(['GET'])
+def get_all_stockLists_shared(request):
+    
+    shared_stock_lists = StockListAccessibleBy.objects.filter(user=request.user)
+    
+    stock_list_ids = list(shared_stock_lists.values_list('slid', flat=True))
+    
+    stock_list_items = StockList.objects.filter(slid__in=stock_list_ids)
+    
+    serializer = StockListSerializer(stock_list_items, many=True)
+
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+
+
+@api_view(['POST'])
+def leave_review(request, slid):
+    stock_list = StockList.objects.get(slid=slid)
+    user = request.user
+
+    if not stock_list:
+        return Response({'message': 'Stock list not found'})
+
+    user = request.user
+    review_text = request.data.get('reviewText', '')
+
+    if Review.objects.filter(slid=slid, uid=user.id).exists():
+        return Response({'message': 'You have already reviewed this stock list'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        review = Review(slid=stock_list, uid=user, reviewText=review_text, reviewDate=timezone.now())
+        review.save() 
+        return Response({'message': 'Review added successfully'}, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        return Response({'message': f'Could not add review: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+        
+@api_view(['PUT'])
+def edit_review(request, slid):
+    try:
+        review = Review.objects.get(slid=slid, uid=request.user)
+    except Review.DoesNotExist:
+        return Response({'message': 'Review not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    review_text = request.data.get('reviewText', '')
+
+    try:
+        review.reviewText = review_text
+        review.reviewDate = timezone.now()
+        review.save()
+        print(review.reviewText)
+        return Response({'message': 'Review updated successfully'}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'message': f'Could not update review: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['DELETE'])
+def delete_review(request, slid):
+    print(slid, request.user.id)
+    try:
+        review = Review.objects.get(slid=slid, uid=request.user)
+        print("found review")
+    except Review.DoesNotExist:
+        return Response({'message': 'Review not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        review.delete()
+        return Response({'message': 'Review deleted successfully'}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'message': f'Could not delete review: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['DELETE'])
+def delete_review_of_your_stock_list(request, slid, username):
+    print(slid, username)
+    try:
+        user = get_object_or_404(User, username=username)
+        review = Review.objects.get(slid=slid, uid= user)
+        print(review.slid)
+    except Review.DoesNotExist:
+        return Response({'message': 'Review not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        review.delete()
+        return Response({'message': 'Review deleted successfully'}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'message': f'Could not delete review: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+def get_review(request, slid):
+    uid = request.user.id
+    reviews = Review.objects.filter(slid=slid,uid=uid).first()
+    print(reviews)
+    serializer = ReviewSerializer(reviews, many=False)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def get_all_reviews(request, slid):
+    try:
+        reviews = Review.objects.filter(slid=slid)
+        review_data = []
+        
+        for review in reviews:
+            user =  get_object_or_404(User, id=review.uid.id)
+            review_data.append({
+                'reviewText': review.reviewText,
+                'reviewDate': review.reviewDate,
+                'slid': str(review.slid),
+                'username': user.username
+            })
+
+        return Response(review_data, status=status.HTTP_200_OK)
+    
+    except Review.DoesNotExist:
+        return Response({'message': 'No reviews found for this stock list'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['GET'])
+def get_public_stock_lists(request):
+    public_stock_lists = StockList.objects.filter(visibility='public')
+    serializer = StockListSerializer(public_stock_lists, many=True)
+    return Response(serializer.data)

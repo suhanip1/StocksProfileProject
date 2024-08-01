@@ -2,7 +2,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.models import User
-from .models import Friends, Stock, StockPerformance, StockList, StockListItem,IsAccessibleBy
+from .models import Friends, Stock, StockPerformance, StockList, StockListItem, StockListAccessibleBy, Review
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -68,11 +68,14 @@ class StockListItemSerializer(serializers.ModelSerializer):
         model = StockListItem
         fields = ['slid', 'symbol', 'shares']
 
-class IsAccessibleBySerializer(serializers.ModelSerializer):
-    slid = StockListSerializer(read_only=True)  # Nested serializer for StockList
-    user = UserSerializer(read_only=True)        # Nested serializer for User
-
+class StockListAccessibleBySerializer(serializers.ModelSerializer):
+    Slid = StockListSerializer(read_only=True)  
+    user = UserSerializer(read_only=True)      
     class Meta:
-        model = IsAccessibleBy
+        model = StockListAccessibleBy
         fields = ['slid', 'user']
     
+class ReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Review
+        fields = ['slid', 'uid', 'reviewText', 'reviewDate']

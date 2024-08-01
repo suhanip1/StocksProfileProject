@@ -1,8 +1,10 @@
 import React, { useEffect } from "react";
 import LogInPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
+import SharedStockListPage from "./pages/sharedStockListPage";
 import StockList from "./pages/StockList";
 import SearchStock from "./pages/SearchStocks";
+import PublicStockLists from "./pages/PublicStockLists";
 import {
   BrowserRouter as Router,
   Route,
@@ -92,6 +94,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <FriendsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/SharedStockLists"
+              element={
+                <ProtectedRoute>
+                  <SharedStockListPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/PublicStockLists"
+              element={
+                <ProtectedRoute>
+                  <PublicStockLists />
                 </ProtectedRoute>
               }
             />
