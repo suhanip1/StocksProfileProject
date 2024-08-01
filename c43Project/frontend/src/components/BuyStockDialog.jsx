@@ -24,58 +24,105 @@ import AddIcon from "@mui/icons-material/Add";
 import api from "../api";
 import host from "../utils/links";
 
-function AddToStockList({ open, handleClose, symbol }) {
+function BuyStock({ open, handleClose, symbol }) {
   const [shares, setShares] = React.useState(0);
   const [selectedValue, setSelectedValue] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [openSnackbar, setOpenSnackbar] = React.useState(false);
   const [snackSeverity, setSnackSeverity] = React.useState("success");
-  const [stockLists, setStockLists] = React.useState([]);
+  const [portfolio, setPortfolio] = React.useState([]);
+  const [totalCost, setTotalCost] = React.useState(0);
+  const [price, setPrice] = React.useState(0);
+  const [cashBalance, setCashBalance] = React.useState(0);
 
   React.useEffect(() => {
-    getStockLists();
+    getPortfolio();
+    getPrice();
   }, []);
 
-  const getStockLists = async () => {
+  React.useEffect(() => {
+    getTotalPrice();
+  }, [shares]);
+
+  React.useEffect(() => {
+    if (selectedValue) {
+      getCashBalance();
+    }
+  }, [selectedValue]);
+
+  const getTotalPrice = () => {
+    const cost = shares * price;
+    setTotalCost(cost.toFixed(2));
+  };
+
+  const getPortfolio = async () => {
     try {
-      const response = await api.get("/stocklists/", {
+      const response = await api.get("/portfolio/", {
         headers: {
           "Content-Type": "application/json",
         },
       });
-      setStockLists(response.data);
+      setPortfolio(response.data);
     } catch (error) {
-      console.error("Error fetching stock lists:", error.response.data);
+      console.error("Error fetching portfolios", error.response.data);
+    }
+  };
+
+  const getPrice = async () => {
+    try {
+      const response = await api.get(`strike-price/${symbol}/`);
+      console.log(response.data.strike_price);
+      setPrice(response.data.strike_price);
+    } catch (error) {
+      console.error("Error getting strike price", error.response.data);
+    }
+  };
+
+  const getCashBalance = async () => {
+    try {
+      const response = await api.get(`/cash-account/${selectedValue}/`, {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      setCashBalance(response.data.balance.toFixed(2));
+    } catch (error) {
+      console.error("Error fetching stock holdings:", error.response.data);
     }
   };
 
   const handleSubmit = async () => {
     if (selectedValue != "" && shares != 0) {
       console.log(selectedValue);
-      const data = {
-        slid: selectedValue,
-        symbol: symbol,
-        shares: shares,
-      };
       try {
-        const response = await api.post("/stocklistitems/add-or-update/", data);
+        const response = await api.post(
+          `buy-stock/${selectedValue}/${symbol}/${shares}/`
+        );
         console.log("Success:", response.data);
-        setMessage(`Successfully added ${shares} shares of ${symbol}!`);
+        setMessage(
+          `Successfully bought ${shares} shares of ${symbol} with a total cost of: ${totalCost}!`
+        );
         setSnackSeverity("success");
         setOpenSnackbar(true);
+        handleClose();
       } catch (error) {
-        console.error("Error:", error);
-        setMessage(`Error when adding ${shares} shares of ${symbol}!`);
+        if (error.response) {
+          if (error.response.data.error == "Insufficient balance.") {
+            setMessage(`Insufficient funds!`);
+          }
+        } else {
+          console.error("Error:", error);
+          setMessage(`Error when buying ${shares} shares of ${symbol}!`);
+          handleClose();
+        }
         setSnackSeverity("error");
         setOpenSnackbar(true);
       }
-
-      handleClose();
     } else {
       if (selectedValue == "") {
-        setMessage("Please select a stock list to add to");
+        setMessage("Please select a portfolio to add to");
       } else {
-        setMessage("Please provide a number of shares to add");
+        setMessage("Please provide a number of shares to buy");
       }
 
       setSnackSeverity("error");
@@ -95,24 +142,29 @@ function AddToStockList({ open, handleClose, symbol }) {
   return (
     <div>
       <Dialog open={open} onClose={handleClose}>
-        <DialogTitle>Add to Stock List</DialogTitle>
+        <DialogTitle>Buy Stock</DialogTitle>
         <DialogContent>
           <Stack spacing={1}>
-            <DialogContentText>Select a Stock List:</DialogContentText>
+            <DialogContentText>Select a Portfolio:</DialogContentText>
             <FormControl sx={{ m: 1, minWidth: 120 }}>
               <Select
                 value={selectedValue}
                 onChange={handleChange}
                 displayEmpty
               >
-                {stockLists.map((stockList) => (
-                  <MenuItem key={stockList.slid} value={stockList.slid}>
-                    {stockList.sl_name}
+                {portfolio.map((portfolio) => (
+                  <MenuItem key={portfolio.pid} value={portfolio.pid}>
+                    {portfolio.pname}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
-            <DialogContentText>Select the number of shares:</DialogContentText>
+            <DialogContentText>
+              Portfolio you selected has a cash balance of: ${cashBalance}
+            </DialogContentText>
+            <DialogContentText>
+              Select the number of shares to buy:
+            </DialogContentText>
             <Stack
               direction={"row"}
               sx={{
@@ -149,6 +201,7 @@ function AddToStockList({ open, handleClose, symbol }) {
                 <AddIcon />
               </IconButton>
             </Stack>
+            <DialogContentText>Total cost: ${totalCost}</DialogContentText>
           </Stack>
         </DialogContent>
 
@@ -159,7 +212,7 @@ function AddToStockList({ open, handleClose, symbol }) {
             sx={{ backgroundColor: "green" }}
             variant="contained"
           >
-            Add
+            Buy
           </Button>
         </DialogActions>
       </Dialog>
@@ -176,4 +229,4 @@ function AddToStockList({ open, handleClose, symbol }) {
     </div>
   );
 }
-export default AddToStockList;
+export default BuyStock;

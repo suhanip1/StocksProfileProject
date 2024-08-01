@@ -1,8 +1,9 @@
 import React from "react";
 import { Stack, Typography, Divider, Box, Button } from "@mui/material";
 import { useNavigate, useLocation } from "react-router-dom";
+import Statistics from "../components/getData";
 
-import StockGraph from "../components/stockGraph2";
+import StockGraph from "../components/stockGraph";
 
 function Stock() {
   const location = useLocation();
@@ -10,15 +11,16 @@ function Stock() {
   const queryParams = new URLSearchParams(location.search);
   const symbol = queryParams.get("symbol");
   const strikePrice = queryParams.get("strikePrice");
+  const navigatePath = queryParams.get("navigatePath");
 
   const handleHome = () => {
     console.log("Go back to Home Page");
     navigate("/");
   };
 
-  const handleStocks = () => {
-    console.log("Stocks");
-    navigate("/stocks");
+  const handleBack = () => {
+    console.log(navigatePath);
+    navigate(navigatePath);
   };
 
   return (
@@ -26,12 +28,15 @@ function Stock() {
       sx={{ display: "flex", justifyContent: "center", alignItems: "center" }}
     >
       <Stack spacing={2}>
-        <Button variant="outlined" onClick={handleHome}>
-          Back to Home
-        </Button>
-        <Button variant="outlined" onClick={handleStocks}>
-          Back to Search
-        </Button>
+        <Stack direction="row" spacing={2}>
+          <Button variant="outlined" onClick={handleBack}>
+            Back
+          </Button>
+          <Button variant="outlined" onClick={handleHome}>
+            Back to Home
+          </Button>
+        </Stack>
+
         <Typography
           sx={{ fontFamily: "monospace", fontSize: "3rem", fontWeight: "bold" }}
         >
@@ -39,7 +44,7 @@ function Stock() {
           {symbol}
         </Typography>
         <Typography sx={{ fontFamily: "monospace", fontSize: "1rem" }}>
-          Strike Price: {strikePrice}
+          Present Market Value: {strikePrice}
         </Typography>
         <Divider variant="middle" />
         <StockGraph symbol={symbol}></StockGraph>

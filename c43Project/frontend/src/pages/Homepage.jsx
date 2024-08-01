@@ -22,7 +22,7 @@ function HomePage() {
 
   const handlePortfolio = () => {
     console.log("Go to Portfolios List");
-    // navigate("/Portfolio");
+    navigate("/portfolio");
   };
 
   const handleStockLists = () => {
@@ -38,6 +38,11 @@ function HomePage() {
   const handleStocks = () => {
     console.log("Stocks");
     navigate("/stocks");
+  };
+
+  const handleRecordDaily = () => {
+    console.log("Record daily stock information");
+    navigate("/recordDailyStock");
   };
 
   const handleFriends = () => {
@@ -92,6 +97,14 @@ function HomePage() {
           onClick={handleStocks}
         >
           Search For Stocks
+        </Button>
+        <Button
+          variant="contained"
+          size="large"
+          sx={{ fontSize: "1.5rem" }}
+          onClick={handleRecordDaily}
+        >
+          Record Daily Stock Information
         </Button>
         <Button
           variant="contained"

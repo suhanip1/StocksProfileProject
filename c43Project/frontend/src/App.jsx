@@ -18,6 +18,10 @@ import StockGraph from "./components/stockGraph";
 import StockLists from "./pages/StockLists";
 import Stock from "./pages/Stock";
 import FriendsPage from "./pages/friendsPage";
+import Portfolio from "./pages/Portfolio";
+import PortfolioPage from "./pages/PortfolioPage";
+import RecordDailyStock from "./pages/RecordDailyStock";
+import StockMatrix from "./components/StatisticMatrix";
 
 const darkTheme = createTheme({
   palette: {
@@ -88,10 +92,42 @@ function App() {
               }
             />
             <Route
+              path="/recordDailyStock"
+              element={
+                <ProtectedRoute>
+                  <RecordDailyStock />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/friends"
               element={
                 <ProtectedRoute>
                   <FriendsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/portfolio"
+              element={
+                <ProtectedRoute>
+                  <Portfolio />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/portfolio-page"
+              element={
+                <ProtectedRoute>
+                  <PortfolioPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/stock-matrix"
+              element={
+                <ProtectedRoute>
+                  <StockMatrix />
                 </ProtectedRoute>
               }
             />

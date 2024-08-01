@@ -1,9 +1,10 @@
 from datetime import datetime
-from django.db import IntegrityError, connection
+import json
+from django.db import IntegrityError, connection, transaction
 from django.shortcuts import render
 from rest_framework import generics
-from .models import StockList, Stock
-from .serializers import StockListItemSerializer, StockListSerializer, UserSerializer, StockSerializer
+from .models import CashAccount, Portfolio, Purchase, StockHolding, StockList, Stock, StockPerformance
+from .serializers import PortfolioSerializer, StockListItemSerializer, StockListSerializer, StockPerformanceSerializer, UserSerializer, StockSerializer
 from .serializers import FriendsSerializer, UserSerializer
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
@@ -15,7 +16,7 @@ from rest_framework.decorators import api_view
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from datetime import timedelta
+from datetime import datetime, timedelta
 from django.core.exceptions import ValidationError
 
 
@@ -128,26 +129,49 @@ def remove_sent_request(request, username):
     friend_request.delete()
     return Response({'message': 'Friend request removed.'}, status=status.HTTP_200_OK)
 
+def get_latest_date(request):
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+        max_date = cursor.fetchone()[0]
+
+        if not max_date:
+            return JsonResponse({'error': 'No data available'}, status=404)
+    
+        formatted_date = max_date.strftime('%Y-%m-%d')
+
+        return JsonResponse({'latest_date': formatted_date})
+    
+
 def stock_performance(request):
     symbol = request.GET.get('symbol')
-    start_date = request.GET.get('start_date')
-    end_date = request.GET.get('end_date')
+    interval = request.GET.get('interval')
 
-    if not symbol or not start_date or not end_date:
+    if not symbol or not interval:
         return JsonResponse({'error': 'Missing parameters'}, status=400)
-
-    try:
-        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-        tdy = '2018-02-08'
-        tdy_date = datetime.strptime(tdy, '%Y-%m-%d').date()
-    except ValueError:
-        return JsonResponse({'error': 'Invalid date format'}, status=400)
     
-    
-    # need to add todays data as well
-
     with connection.cursor() as cursor:
+        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+        max_date = cursor.fetchone()[0]
+
+        if not max_date:
+            return JsonResponse({'error': 'No data available'}, status=404)
+
+        end_date = max_date
+
+        if interval == 'week':
+            start_date = end_date - timedelta(weeks=1)
+        elif interval == 'month':
+            start_date = end_date - timedelta(days=30)
+        elif interval == 'quarter':
+            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
+        elif interval == 'year':
+            start_date = end_date.replace(year=end_date.year - 1)
+        elif interval == 'five_years':
+            start_date = end_date.replace(year=end_date.year - 5)
+        else:
+            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+
         query = '''
         SELECT timestamp, close
         FROM stocksapp_stockperformance
@@ -161,6 +185,160 @@ def stock_performance(request):
     results = [{'timestamp': row[0], 'close': row[1]} for row in rows]
     
     return JsonResponse(results, safe=False)
+
+def predict_prices(request, symbol, pastInterval, futureInterval):
+
+    intervals = {
+        'week': '7 days',
+        'month': '30 days',
+        'quarter': '90 days',
+        'year': '365 days'
+    }
+
+    if futureInterval not in intervals:
+        return JsonResponse({'error': 'Invalid interval'}, status=400)
+
+    days = intervals[futureInterval]
+
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+        max_date = cursor.fetchone()[0]
+
+        if not max_date:
+            return JsonResponse({'error': 'No data available'}, status=404)
+
+        end_date = max_date
+
+        if pastInterval == 'week':
+            start_date = end_date - timedelta(weeks=1)
+        elif pastInterval == 'month':
+            start_date = end_date - timedelta(days=30)
+        elif pastInterval == 'quarter':
+            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
+        elif pastInterval == 'year':
+            start_date = end_date.replace(year=end_date.year - 1)
+        elif pastInterval == 'five_years':
+            start_date = end_date.replace(year=end_date.year - 5)
+        else:
+            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+        
+        cursor.execute(f"""
+        WITH RECURSIVE future_dates AS (
+            SELECT 
+                MAX(timestamp) + INTERVAL '1 day' AS timestamp
+            FROM 
+                stocksapp_stockperformance
+            WHERE 
+                symbol = %s
+            UNION ALL
+            SELECT 
+                timestamp + INTERVAL '1 day'
+            FROM 
+                future_dates
+            WHERE 
+                timestamp < (SELECT MAX(timestamp) + INTERVAL %s FROM stocksapp_stockperformance WHERE symbol = %s)
+        ),
+        Returns AS (
+            SELECT
+                current.timestamp,
+                current.close AS stock_close,
+                prev.close AS stock_prev_close,
+                (current.close - prev.close) / prev.close AS return
+            FROM
+                stocksapp_stockperformance current
+            JOIN
+                stocksapp_stockperformance prev
+            ON
+                current.symbol = prev.symbol
+                AND prev.timestamp = (
+                    SELECT MAX(p.timestamp)
+                    FROM stocksapp_stockperformance p
+                    WHERE p.symbol = current.symbol
+                    AND p.timestamp < current.timestamp
+                )
+            WHERE
+                current.symbol = %s
+                AND current.timestamp BETWEEN %s AND %s
+        ),
+        AvgReturn AS (
+            SELECT 
+                AVG(return) AS avg_return
+            FROM Returns
+        ),
+        benchmark_returns AS (
+            SELECT
+                current.timestamp,
+                current.close AS benchmark_close,
+                prev.close AS benchmark_prev_close,
+                (current.close - prev.close) / prev.close AS benchmark_return
+            FROM
+                stocksapp_stockperformance current
+            JOIN
+                stocksapp_stockperformance prev
+            ON
+                current.symbol = prev.symbol
+                AND prev.timestamp = (
+                    SELECT MAX(p.timestamp)
+                    FROM stocksapp_stockperformance p
+                    WHERE p.symbol = current.symbol
+                    AND p.timestamp < current.timestamp
+                )
+            WHERE
+                current.symbol = 'SPY'
+                AND current.timestamp BETWEEN %s AND %s
+        ),
+        combined_returns AS (
+            SELECT
+                s.timestamp,
+                s.return,
+                b.benchmark_return
+            FROM
+                Returns s
+            JOIN
+                benchmark_returns b
+            ON
+                s.timestamp = b.timestamp
+        ),
+        covariance_variance AS (
+            SELECT
+                COVAR_SAMP(return, benchmark_return) AS covariance,
+                VARIANCE(benchmark_return) AS variance
+            FROM
+                combined_returns
+        ), 
+        Beta AS (
+            SELECT
+                covariance / variance AS beta
+            FROM
+                covariance_variance
+        ),
+        predictions AS (
+            SELECT 
+                f.timestamp,
+                NULL AS close,
+                (SELECT MAX(close) FROM stocksapp_stockperformance WHERE symbol = %s) * 
+                (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) AS predicted_price
+            FROM 
+                future_dates f,
+                AvgReturn a,
+                Beta b
+        )
+        SELECT 
+            timestamp,
+            close,
+            predicted_price
+        FROM 
+            predictions
+        WHERE timestamp > (SELECT MAX(timestamp) FROM stocksapp_stockperformance WHERE symbol = %s)
+        ORDER BY 
+            Timestamp;
+        """, [symbol, days, symbol, symbol, start_date, end_date, start_date, end_date, symbol, symbol])
+
+        rows = cursor.fetchall()
+
+    data = [{'timestamp': row[0], 'close': row[2]} for row in rows]
+    return JsonResponse(data, safe=False)
 
 class StockListCreateView(generics.CreateAPIView):
     # INSERT INTO StockList(slid, visibility, slname, user) VALUES (slid, visbility, slName, self.request.user)
@@ -200,10 +378,13 @@ class StockListDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, slid):
-        with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM stocksapp_stocklist WHERE slid = %s", [slid])
-        
+        stock_list = get_object_or_404(StockList, pk=slid)
+        stock_list.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+        # with connection.cursor() as cursor:
+        #     cursor.execute("DELETE FROM stocksapp_stocklist WHERE slid = %s", [slid])
+        
+        # return Response(status=status.HTTP_204_NO_CONTENT)
     
 class StockListItemAddOrUpdateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -237,7 +418,76 @@ class StockListItemAddOrUpdateView(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-    
+
+@api_view(['POST'])
+def remove_stock_list_item(request, slid, symbol, shares):
+    try:
+        shares = int(shares)
+        if shares <= 0:
+            return Response({"error": "Number of shares must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
+    except ValueError:
+        return Response({"error": "Number of shares must be a valid integer."}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        try:
+            with connection.cursor() as cursor:
+                # Check if the stock list item exists and fetch the current number of shares
+                cursor.execute("""
+                    SELECT shares
+                    FROM stocksapp_stocklistitem
+                    WHERE slid_id = %s AND symbol_id = %s
+                """, [slid, symbol])
+                
+                row = cursor.fetchone()
+                
+                if not row:
+                    return Response({"error": "Stock list item not found."}, status=status.HTTP_404_NOT_FOUND)
+
+                current_shares = row[0]
+
+                if current_shares < shares:
+                    return Response({"error": "Not enough shares to remove."}, status=status.HTTP_400_BAD_REQUEST)
+
+                if current_shares == shares:
+                    # Delete the stock list item if shares to remove are equal to the existing shares
+                    cursor.execute("""
+                        DELETE FROM stocksapp_stocklistitem
+                        WHERE slid_id = %s AND symbol_id = %s
+                    """, [slid, symbol])
+                else:
+                    # Otherwise, update the number of shares
+                    new_shares = current_shares - shares
+                    cursor.execute("""
+                        UPDATE stocksapp_stocklistitem
+                        SET shares = %s
+                        WHERE slid_id = %s AND symbol_id = %s
+                    """, [new_shares, slid, symbol])
+            
+            return Response({"status": "Stock list item updated successfully."}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            # Rollback transaction and return an error response
+            transaction.set_rollback(True)
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class StocklistMarketValueView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, slid):
+        try: 
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT SUM(si.shares * s.strike_price) AS total_value
+                    FROM stocksapp_stocklistitem AS si
+                    JOIN stocksapp_stock AS s ON s.symbol = si.symbol_id
+                    WHERE si.slid_id = %s;
+                """, [slid])
+
+                row = cursor.fetchone()
+                total_value = row[0] if row[0] is not None else 0
+            return JsonResponse({'stocklist_id': slid, 'market_value': total_value})
+        except Portfolio.DoesNotExist:
+            return JsonResponse({'error': 'Portfolio not found'}, status=404)    
 
 class StockView(APIView):
     permission_classes = [IsAuthenticated]
@@ -254,7 +504,26 @@ class StockView(APIView):
 
         serializer = StockSerializer(stocks, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-    
+
+
+class GetStrikePriceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, symbol):
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT strike_price
+                FROM stocksapp_stock
+                WHERE symbol = %s
+            """, [symbol])
+            row = cursor.fetchone()
+
+        if row:
+            strike_price = row[0]
+            return Response({"symbol": symbol, "strike_price": strike_price}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "Stock not found."}, status=status.HTTP_404_NOT_FOUND)
+        
 
 class StockListItemView(APIView):
     permission_classes = [IsAuthenticated]
@@ -274,3 +543,920 @@ class StockListItemView(APIView):
         stocklistitem = [dict(zip(columns, row)) for row in rows]
         
         return Response(stocklistitem, status=status.HTTP_200_OK)
+    
+
+class PortfolioCreateView(generics.CreateAPIView):
+    queryset = Portfolio.objects.all()
+    serializer_class = PortfolioSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        cash_account = CashAccount.objects.create(balance=0.00)  # Create a new CashAccount
+        print(cash_account)
+        serializer.save(user=user, cash_account=cash_account)  # Save the Portfolio with the new CashAccount
+
+class PortfolioView(generics.ListAPIView):
+    # SELECT * FROM Portfolio WHERE uid=self.request.user
+    queryset = Portfolio.objects.all()
+    serializer_class = PortfolioSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Portfolio.objects.filter(user=self.request.user)
+    
+class PortfolioEditView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, pid, pname = ""):
+        with connection.cursor() as cursor:
+            if pname != "" and pid:
+                cursor.execute("UPDATE stocksapp_portfolio SET pname = %s WHERE pid = %s", [pname, pid])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    
+class PortfolioDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pid):
+        portfolio = get_object_or_404(Portfolio, pk=pid)
+        portfolio.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class StockHoldingsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pid):
+        ### get all the information from stockholdings and strikeprice of the symbol
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT sh.pid_id, sh.symbol_id, sh.shares_owned, s.strike_price
+                FROM stocksapp_stockholding sh
+                JOIN stocksapp_stock s ON sh.symbol_id = s.symbol
+                WHERE sh.pid_id = %s
+            """, [pid])
+            rows = cursor.fetchall()
+            columns = [col[0] for col in cursor.description]
+        
+        stocklistitem = [dict(zip(columns, row)) for row in rows]
+        
+        return Response(stocklistitem, status=status.HTTP_200_OK)
+    
+class PortfolioMarketValueView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pid):
+        try: 
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT SUM(sh.shares_owned * s.strike_price) AS total_value
+                    FROM stocksapp_stockholding AS sh
+                    JOIN stocksapp_stock AS s ON s.symbol = sh.symbol_id
+                    WHERE sh.pid_id = %s;
+                """, [pid])
+
+                row = cursor.fetchone()
+                total_value = row[0] if row[0] is not None else 0
+            return JsonResponse({'portfolio_id': pid, 'market_value': total_value})
+        except Portfolio.DoesNotExist:
+            return JsonResponse({'error': 'Portfolio not found'}, status=404)
+
+class PortfolioCashBalanceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pid):
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT ca.acc_id, ca.balance
+                FROM stocksapp_cashaccount ca
+                JOIN stocksapp_portfolio p ON p.cash_account_id = ca.acc_id
+                WHERE p.pid = %s
+            """, [pid])
+            row = cursor.fetchone()
+        
+        if row:
+            acc_id, balance = row
+            return Response({"acc_id": acc_id, "balance": balance}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "Portfolio or Cash Account not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+
+class PortfolioCashTransferView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pid1, pid2, amount):
+
+        if not (pid1 and pid2 and amount):
+            return Response({"error": "Missing required fields: 'pid1', 'pid2', and 'amount' are all required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = round(float(amount), 2)
+        except ValueError:
+            return Response({"error": "Amount must be a valid number."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount <= 0:
+            return Response({"error": "Amount must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with connection.cursor() as cursor:
+            # Get balances for both portfolios
+            cursor.execute("""
+                SELECT ca.acc_id, ca.balance
+                FROM stocksapp_cashaccount ca
+                JOIN stocksapp_portfolio p ON p.cash_account_id = ca.acc_id
+                WHERE p.pid = %s
+            """, [pid1])
+            row1 = cursor.fetchone()
+
+            cursor.execute("""
+                SELECT ca.acc_id, ca.balance
+                FROM stocksapp_cashaccount ca
+                JOIN stocksapp_portfolio p ON p.cash_account_id = ca.acc_id
+                WHERE p.pid = %s
+            """, [pid2])
+            row2 = cursor.fetchone()
+
+            if not row1 or not row2:
+                return Response({"error": "One or both portfolios not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            acc_id1, balance1 = row1
+            acc_id2, balance2 = row2
+
+            if balance2 < amount:
+                return Response({"error": "Insufficient funds in the source portfolio."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Perform the transfer
+            new_balance1 = round(balance1 + amount, 2)
+            new_balance2 = round(balance2 - amount, 2)
+
+            cursor.execute("UPDATE stocksapp_cashaccount SET balance = %s WHERE acc_id = %s", [new_balance1, acc_id1])
+            cursor.execute("UPDATE stocksapp_cashaccount SET balance = %s WHERE acc_id = %s", [new_balance2, acc_id2])
+
+        return Response({"status": "Transfer successful"}, status=status.HTTP_200_OK)
+    
+
+class PortfolioCashDepositView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pid, amount):
+
+        if not (pid and amount):
+            return Response({"error": "Missing required fields: 'pid', and 'amount' are all required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = round(float(amount), 2)
+        except ValueError:
+            return Response({"error": "Amount must be a valid number."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount <= 0:
+            return Response({"error": "Amount must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT ca.acc_id, ca.balance
+                FROM stocksapp_cashaccount ca
+                JOIN stocksapp_portfolio p ON p.cash_account_id = ca.acc_id
+                WHERE p.pid = %s
+            """, [pid])
+            row = cursor.fetchone()
+
+            if not row:
+                return Response({"error": "portfolio not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            acc_id, balance = row
+
+            # Perform the transfer
+            new_balance = round(balance + amount, 2)
+
+            cursor.execute("UPDATE stocksapp_cashaccount SET balance = %s WHERE acc_id = %s", [new_balance, acc_id])
+
+        return Response({"status": "Deposit successful"}, status=status.HTTP_200_OK)
+
+class PortfolioCashWithdrawView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pid, amount):
+
+        if not (pid and amount):
+            return Response({"error": "Missing required fields: 'pid', and 'amount' are all required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = round(float(amount), 2)
+        except ValueError:
+            return Response({"error": "Amount must be a valid number."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount <= 0:
+            return Response({"error": "Amount must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT ca.acc_id, ca.balance
+                FROM stocksapp_cashaccount ca
+                JOIN stocksapp_portfolio p ON p.cash_account_id = ca.acc_id
+                WHERE p.pid = %s
+            """, [pid])
+            row = cursor.fetchone()
+
+            if not row:
+                return Response({"error": "portfolio not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            acc_id, balance = row
+            
+            if balance >= amount:
+                # Perform the withdrawl
+                new_balance = round(balance - amount, 2)
+
+                cursor.execute("UPDATE stocksapp_cashaccount SET balance = %s WHERE acc_id = %s", [new_balance, acc_id])
+
+                return Response({"status": "Deposit successful"}, status=status.HTTP_200_OK)
+            else:
+                return Response({"error": "Not enough to withdraw."}, status=status.HTTP_400_BAD_REQUEST)
+    
+
+class BuyStockView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pid, symbol, quantity):
+        try:
+            quantity = int(quantity)
+            if quantity <= 0:
+                return Response({"error": "Quantity must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError:
+            return Response({"error": "Quantity must be a valid integer."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            stock = Stock.objects.get(symbol=symbol)
+        except Stock.DoesNotExist:
+            return Response({"error": "Stock not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        strike_price = round(stock.strike_price, 2)
+        total_price = round(strike_price * quantity, 2)
+
+        with connection.cursor() as cursor:
+            try:
+                with transaction.atomic():
+                    # Fetch the cash account balance
+                    cursor.execute("""
+                        SELECT ca.acc_id, ca.balance
+                        FROM stocksapp_cashaccount ca
+                        JOIN stocksapp_portfolio p ON p.cash_account_id = ca.acc_id
+                        WHERE p.pid = %s AND p.user_id = %s
+                    """, [pid, request.user.id])
+                    row = cursor.fetchone()
+
+                    if not row:
+                        return Response({"error": "Portfolio not found or you don't have access."}, status=status.HTTP_404_NOT_FOUND)
+
+                    acc_id, balance = row
+
+                    if balance < total_price:
+                        return Response({"error": "Insufficient balance."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    # Deduct the amount from the cash account
+                    new_balance = round(balance - total_price, 2)
+                    cursor.execute("UPDATE stocksapp_cashaccount SET balance = %s WHERE acc_id = %s", [new_balance, acc_id])
+
+                    # Add or update stock holding
+                    cursor.execute("""
+                        SELECT shares_owned FROM stocksapp_stockholding
+                        WHERE pid_id = %s AND symbol_id = %s
+                    """, [pid, stock.symbol])
+                    row = cursor.fetchone()
+                    print("add/update stock holding:", row)
+
+                    if row:
+                        shares_owned = row[0] + quantity
+                        cursor.execute("""
+                            UPDATE stocksapp_stockholding
+                            SET shares_owned = %s
+                            WHERE pid_id = %s AND symbol_id = %s
+                        """, [shares_owned, pid, stock.symbol])
+                    else:
+                        cursor.execute("""
+                            INSERT INTO stocksapp_stockholding (pid_id, symbol_id, shares_owned)
+                            VALUES (%s, %s, %s)
+                        """, [pid, stock.symbol, quantity])
+
+                    # Insert into purchases
+                    timestamp = timezone.now()
+                    cursor.execute("""
+                        INSERT INTO stocksapp_purchase (timestamp, quantity, purchase_price, user_id, symbol_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, [timestamp, quantity, strike_price, request.user.id, stock.symbol])
+
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"status": "Stock purchase successful"}, status=status.HTTP_200_OK)
+    
+class SellStockView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pid, symbol, shares):
+        try:
+            shares = int(shares)
+            if shares <= 0:
+                return Response({"error": "Shares must be greater than zero."}, status=400)
+        except ValueError:
+            return Response({"error": "Shares must be a valid integer."}, status=400)
+
+        with connection.cursor() as cursor:
+            try:
+                with transaction.atomic():
+                    # Fetch the stock's strike price and the number of shares owned
+                    cursor.execute("""
+                        SELECT strike_price FROM stocksapp_stock WHERE symbol = %s
+                    """, [symbol])
+                    stock_row = cursor.fetchone()
+                    if not stock_row:
+                        return Response({"error": "Stock not found."}, status=404)
+
+                    strike_price = round(stock_row[0], 2)
+
+                    cursor.execute("""
+                        SELECT shares_owned FROM stocksapp_stockholding
+                        WHERE pid_id = %s AND symbol_id = %s
+                    """, [pid, symbol])
+                    holding_row = cursor.fetchone()
+                    if not holding_row or holding_row[0] < shares:
+                        return Response({"error": "Not enough shares to sell."}, status=400)
+
+                    # Calculate the total price for the shares being sold
+                    total_price = strike_price * shares
+
+                    # Update the stock holding
+                    new_shares = holding_row[0] - shares
+                    if new_shares > 0:
+                        cursor.execute("""
+                            UPDATE stocksapp_stockholding
+                            SET shares_owned = %s
+                            WHERE pid_id = %s AND symbol_id = %s
+                        """, [new_shares, pid, symbol])
+                    else:
+                        cursor.execute("""
+                            DELETE FROM stocksapp_stockholding
+                            WHERE pid_id = %s AND symbol_id = %s
+                        """, [pid, symbol])
+
+                    # Update the cash account balance
+                    cursor.execute("""
+                        SELECT ca.acc_id, ca.balance
+                        FROM stocksapp_cashaccount ca
+                        JOIN stocksapp_portfolio p ON p.cash_account_id = ca.acc_id
+                        WHERE p.pid = %s
+                    """, [pid])
+                    cash_account_row = cursor.fetchone()
+                    if not cash_account_row:
+                        return Response({"error": "Cash account not found."}, status=404)
+
+                    acc_id, balance = cash_account_row
+                    new_balance = balance + total_price
+
+                    cursor.execute("""
+                        UPDATE stocksapp_cashaccount
+                        SET balance = %s
+                        WHERE acc_id = %s
+                    """, [new_balance, acc_id])
+
+            except Exception as e:
+                return Response({"error": str(e)}, status=500)
+
+        return Response({"status": "Stock sale successful"}, status=200)
+    
+
+class DailyStockInformationView(generics.CreateAPIView):
+    permission_classes = [AllowAny]
+    def post(self, request):
+        serializer = StockPerformanceSerializer(data=request.data)
+
+        if serializer.is_valid():
+            # Extract symbol and timestamp from request data
+            symbol = serializer.validated_data['symbol']
+            timestamp = serializer.validated_data['timestamp']
+
+            # Check if the record already exists
+            if StockPerformance.objects.filter(symbol=symbol, timestamp=timestamp).exists():
+                return Response({'message': 'Duplicate Daily Stock Information'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Save the new record
+            serializer.save()
+            return Response({'message': 'Daily Stock Information creation successful'}, status=status.HTTP_201_CREATED)
+        
+        return Response({'message': 'Invalid data', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+def stock_cov(request):
+    symbol = request.GET.get('symbol')
+    interval = request.GET.get('interval')
+
+    if not symbol or not interval:
+        return JsonResponse({'error': 'Missing parameters'}, status=400)
+    
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+        max_date = cursor.fetchone()[0]
+
+        if not max_date:
+            return JsonResponse({'error': 'No data available'}, status=404)
+
+        end_date = max_date
+
+        if interval == 'week':
+            start_date = end_date - timedelta(weeks=1)
+        elif interval == 'month':
+            start_date = end_date - timedelta(days=30)
+        elif interval == 'quarter':
+            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
+        elif interval == 'year':
+            start_date = end_date.replace(year=end_date.year - 1)
+        elif interval == 'five_years':
+            start_date = end_date.replace(year=end_date.year - 5)
+        else:
+            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+
+        query = ''' WITH daily_returns AS (
+                SELECT
+                    current.timestamp,
+                    current.close,
+                    prev.close AS prev_close,
+                    (current.close - prev.close) / prev.close AS return
+                FROM
+                    stocksapp_stockperformance current
+                JOIN
+                    stocksapp_stockperformance prev
+                ON
+                    current.symbol = prev.symbol
+                    AND prev.timestamp = (
+                        SELECT MAX(p.timestamp)
+                        FROM stocksapp_stockperformance p
+                        WHERE p.symbol = current.symbol
+                        AND p.timestamp < current.timestamp
+                    )
+                WHERE
+                    current.symbol = %s
+                    AND current.timestamp BETWEEN %s AND %s
+            ),
+            stats AS (
+                SELECT
+                    AVG(return) AS mean_return,
+                    STDDEV(return) AS std_dev_return
+                FROM
+                    daily_returns
+            )
+            SELECT
+                (std_dev_return / mean_return) * 100 AS cov_percentage
+            FROM
+                stats;
+            '''
+        cursor.execute(query, [symbol,start_date, end_date])
+        cov_percentage = cursor.fetchone()[0]
+
+    
+    return JsonResponse(cov_percentage, safe=False)
+
+def stock_beta(request):
+    symbol = request.GET.get('symbol')
+    interval = request.GET.get('interval')
+
+    if not symbol or not interval:
+        return JsonResponse({'error': 'Missing parameters'}, status=400)
+    
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+        max_date = cursor.fetchone()[0]
+
+        if not max_date:
+            return JsonResponse({'error': 'No data available'}, status=404)
+
+        end_date = max_date
+
+        if interval == 'week':
+            start_date = end_date - timedelta(weeks=1)
+        elif interval == 'month':
+            start_date = end_date - timedelta(days=30)
+        elif interval == 'quarter':
+            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
+        elif interval == 'year':
+            start_date = end_date.replace(year=end_date.year - 1)
+        elif interval == 'five_years':
+            start_date = end_date.replace(year=end_date.year - 5)
+        else:
+            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+
+        query = ''' WITH stock_returns AS (
+                        SELECT
+                            current.timestamp,
+                            current.close AS stock_close,
+                            prev.close AS stock_prev_close,
+                            (current.close - prev.close) / prev.close AS stock_return
+                        FROM
+                            stocksapp_stockperformance current
+                        JOIN
+                            stocksapp_stockperformance prev
+                        ON
+                            current.symbol = prev.symbol
+                            AND prev.timestamp = (
+                                SELECT MAX(p.timestamp)
+                                FROM stocksapp_stockperformance p
+                                WHERE p.symbol = current.symbol
+                                AND p.timestamp < current.timestamp
+                            )
+                        WHERE
+                            current.symbol = %s
+                            AND current.timestamp BETWEEN %s AND %s
+                    ),
+                    benchmark_returns AS (
+                        SELECT
+                            current.timestamp,
+                            current.close AS benchmark_close,
+                            prev.close AS benchmark_prev_close,
+                            (current.close - prev.close) / prev.close AS benchmark_return
+                        FROM
+                            stocksapp_stockperformance current
+                        JOIN
+                            stocksapp_stockperformance prev
+                        ON
+                            current.symbol = prev.symbol
+                            AND prev.timestamp = (
+                                SELECT MAX(p.timestamp)
+                                FROM stocksapp_stockperformance p
+                                WHERE p.symbol = current.symbol
+                                AND p.timestamp < current.timestamp
+                            )
+                        WHERE
+                            current.symbol = 'SPY'
+                            AND current.timestamp BETWEEN %s AND %s
+                    ),
+                    combined_returns AS (
+                        SELECT
+                            s.timestamp,
+                            s.stock_return,
+                            b.benchmark_return
+                        FROM
+                            stock_returns s
+                        JOIN
+                            benchmark_returns b
+                        ON
+                            s.timestamp = b.timestamp
+                    ),
+                    covariance_variance AS (
+                        SELECT
+                            COVAR_SAMP(stock_return, benchmark_return) AS covariance,
+                            VARIANCE(benchmark_return) AS variance
+                        FROM
+                            combined_returns
+                    )
+                    SELECT
+                        covariance / variance AS beta
+                    FROM
+                        covariance_variance;
+            '''
+        cursor.execute(query, [symbol, start_date, end_date, start_date, end_date])
+        cov_percentage = cursor.fetchone()[0]
+
+    
+    return JsonResponse(cov_percentage, safe=False)
+
+def get_covariance_matrix(request, id, interval, type):
+
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+        max_date = cursor.fetchone()[0]
+
+        if not max_date:
+            return JsonResponse({'error': 'No data available'}, status=404)
+
+        end_date = max_date
+
+        if interval == 'week':
+            start_date = end_date - timedelta(weeks=1)
+        elif interval == 'month':
+            start_date = end_date - timedelta(days=30)
+        elif interval == 'quarter':
+            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
+        elif interval == 'year':
+            start_date = end_date.replace(year=end_date.year - 1)
+        elif interval == 'five_years':
+            start_date = end_date.replace(year=end_date.year - 5)
+        else:
+            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+        
+
+        if type == "portfolio":
+            query = f"""
+                    WITH stock_returns AS (
+                        SELECT
+                            current.timestamp,
+                            current.symbol,
+                            current.close AS stock_close,
+                            prev.close AS stock_prev_close,
+                            (current.close - prev.close) / prev.close AS daily_return
+                        FROM
+                            stocksapp_StockPerformance current
+                        JOIN
+                            stocksapp_StockPerformance prev
+                        ON
+                            current.symbol = prev.symbol
+                            AND prev.timestamp = (
+                                SELECT MAX(p.timestamp)
+                                FROM stocksapp_StockPerformance p
+                                WHERE p.symbol = current.symbol
+                                AND p.timestamp < current.timestamp
+                            )
+                        WHERE
+                            current.symbol IN (
+                                SELECT symbol_id
+                                FROM stocksapp_stockholding
+                                WHERE pid_id = {id}
+                            )
+                            AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
+                    )
+                    SELECT
+                        s1.symbol AS symbol1,
+                        s2.symbol AS symbol2,
+                        COVAR_SAMP(s1.daily_return, s2.daily_return) AS covariance
+                    FROM
+                        stock_returns s1
+                    JOIN
+                        stock_returns s2 ON s1.timestamp = s2.timestamp
+                    WHERE
+                        s1.symbol < s2.symbol 
+                    GROUP BY
+                        s1.symbol, s2.symbol
+                    ORDER BY
+                        s1.symbol, s2.symbol;
+                """
+        else: 
+            query = f"""
+                WITH stock_returns AS (
+                    SELECT
+                        current.timestamp,
+                        current.symbol,
+                        current.close AS stock_close,
+                        prev.close AS stock_prev_close,
+                        (current.close - prev.close) / prev.close AS daily_return
+                    FROM
+                        stocksapp_StockPerformance current
+                    JOIN
+                        stocksapp_StockPerformance prev
+                    ON
+                        current.symbol = prev.symbol
+                        AND prev.timestamp = (
+                            SELECT MAX(p.timestamp)
+                            FROM stocksapp_StockPerformance p
+                            WHERE p.symbol = current.symbol
+                            AND p.timestamp < current.timestamp
+                        )
+                    WHERE
+                        current.symbol IN (
+                            SELECT symbol_id
+                            FROM stocksapp_stocklistitem
+                            WHERE slid_id = {id}
+                        )
+                        AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
+                )
+                SELECT
+                    s1.symbol AS symbol1,
+                    s2.symbol AS symbol2,
+                    COVAR_SAMP(s1.daily_return, s2.daily_return) AS covariance
+                FROM
+                    stock_returns s1
+                JOIN
+                    stock_returns s2 ON s1.timestamp = s2.timestamp
+                WHERE
+                    s1.symbol < s2.symbol 
+                GROUP BY
+                    s1.symbol, s2.symbol
+                ORDER BY
+                    s1.symbol, s2.symbol;
+            """    
+        
+
+        cursor.execute(query)
+        results = cursor.fetchall()
+
+        print(results)
+
+    # Transform results into a matrix format
+    symbols = list(set([row[0] for row in results] + [row[1] for row in results]))
+    symbols.sort()
+    matrix = {symbol: {symbol: 1.0 for symbol in symbols} for symbol in symbols}
+    
+    for row in results:
+        matrix[row[0]][row[1]] = row[2]
+        matrix[row[1]][row[0]] = row[2] 
+
+    print(matrix)
+
+    return JsonResponse(matrix)
+
+def get_correlation_matrix(request, id, interval, type):
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+        max_date = cursor.fetchone()[0]
+
+        if not max_date:
+            return JsonResponse({'error': 'No data available'}, status=404)
+
+        end_date = max_date
+
+        if interval == 'week':
+            start_date = end_date - timedelta(weeks=1)
+        elif interval == 'month':
+            start_date = end_date - timedelta(days=30)
+        elif interval == 'quarter':
+            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
+        elif interval == 'year':
+            start_date = end_date.replace(year=end_date.year - 1)
+        elif interval == 'five_years':
+            start_date = end_date.replace(year=end_date.year - 5)
+        else:
+            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+
+        if type == "portfolio":
+            query = f"""
+                WITH stock_returns AS (
+                    SELECT
+                        current.timestamp,
+                        current.symbol,
+                        current.close AS stock_close,
+                        prev.close AS stock_prev_close,
+                        (current.close - prev.close) / prev.close AS daily_return
+                    FROM
+                        stocksapp_StockPerformance current
+                    JOIN
+                        stocksapp_StockPerformance prev
+                    ON
+                        current.symbol = prev.symbol
+                        AND prev.timestamp = (
+                            SELECT MAX(p.timestamp)
+                            FROM stocksapp_StockPerformance p
+                            WHERE p.symbol = current.symbol
+                            AND p.timestamp < current.timestamp
+                        )
+                    WHERE
+                        current.symbol IN (
+                            SELECT symbol_id
+                            FROM stocksapp_stockholding
+                            WHERE pid_id = {id}
+                        )
+                        AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
+                )
+                SELECT
+                    s1.symbol AS symbol1,
+                    s2.symbol AS symbol2,
+                    CORR(s1.daily_return, s2.daily_return) AS correlation
+                FROM
+                    stock_returns s1
+                JOIN
+                    stock_returns s2 ON s1.timestamp = s2.timestamp
+                WHERE
+                    s1.symbol < s2.symbol 
+                GROUP BY
+                    s1.symbol, s2.symbol
+                ORDER BY
+                    s1.symbol, s2.symbol;
+            """
+        else: 
+            query = f"""
+                WITH stock_returns AS (
+                    SELECT
+                        current.timestamp,
+                        current.symbol,
+                        current.close AS stock_close,
+                        prev.close AS stock_prev_close,
+                        (current.close - prev.close) / prev.close AS daily_return
+                    FROM
+                        stocksapp_StockPerformance current
+                    JOIN
+                        stocksapp_StockPerformance prev
+                    ON
+                        current.symbol = prev.symbol
+                        AND prev.timestamp = (
+                            SELECT MAX(p.timestamp)
+                            FROM stocksapp_StockPerformance p
+                            WHERE p.symbol = current.symbol
+                            AND p.timestamp < current.timestamp
+                        )
+                    WHERE
+                        current.symbol IN (
+                            SELECT symbol_id
+                            FROM stocksapp_stocklistitem
+                            WHERE slid_id = {id}
+                        )
+                        AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
+                )
+                SELECT
+                    s1.symbol AS symbol1,
+                    s2.symbol AS symbol2,
+                    CORR(s1.daily_return, s2.daily_return) AS correlation
+                FROM
+                    stock_returns s1
+                JOIN
+                    stock_returns s2 ON s1.timestamp = s2.timestamp
+                WHERE
+                    s1.symbol < s2.symbol 
+                GROUP BY
+                    s1.symbol, s2.symbol
+                ORDER BY
+                    s1.symbol, s2.symbol;
+            """    
+
+        cursor.execute(query)
+        results = cursor.fetchall()
+
+        print(results)
+
+    # Transform results into a matrix format
+    symbols = list(set([row[0] for row in results] + [row[1] for row in results]))
+    symbols.sort()
+    matrix = {symbol: {symbol: 1.0 for symbol in symbols} for symbol in symbols}
+    
+    for row in results:
+        matrix[row[0]][row[1]] = row[2]
+        matrix[row[1]][row[0]] = row[2] 
+
+    print(matrix)
+
+    return JsonResponse(matrix)
+
+def get_future_prediction(request, symbol, interval):
+    if not symbol or not interval:
+        return JsonResponse({'error': 'Missing parameters'}, status=400)
+    
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+        max_date = cursor.fetchone()[0]
+
+        if not max_date:
+            return JsonResponse({'error': 'No data available'}, status=404)
+
+        end_date = max_date
+
+        if interval == 'week':
+            start_date = end_date - timedelta(weeks=1)
+        elif interval == 'month':
+            start_date = end_date - timedelta(days=30)
+        elif interval == 'quarter':
+            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
+        elif interval == 'year':
+            start_date = end_date.replace(year=end_date.year - 1)
+        elif interval == 'five_years':
+            start_date = end_date.replace(year=end_date.year - 5)
+        else:
+            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+
+        query = ''' WITH RECURSIVE ema AS (
+                    SELECT
+                        symbol,
+                        timestamp,
+                        close AS price,
+                        close AS ema
+                    FROM
+                        stock_prices
+                    WHERE
+                        timestamp = (SELECT MIN(timestamp) FROM stock_prices WHERE symbol = 'AAPL')
+                    
+                    UNION ALL
+
+                    SELECT
+                        sp.symbol,
+                        sp.timestamp,
+                        sp.close AS price,
+                        ((sp.close - ema.ema) * 0.5) + ema.ema AS ema
+                    FROM
+                        stock_prices sp
+                    INNER JOIN
+                        ema ON sp.timestamp = ema.timestamp + INTERVAL '1 day'
+                    WHERE
+                        sp.symbol = ema.symbol
+
+                    UNION ALL
+
+                    SELECT
+                        ema.symbol,
+                        ema.timestamp + INTERVAL '1 day' AS timestamp,
+                        ema.ema AS price,  -- Use the last EMA as the next price
+                        ema.ema AS ema
+                    FROM
+                        ema
+                    WHERE
+                        ema.timestamp < (SELECT MAX(timestamp) FROM stock_prices WHERE symbol = 'AAPL') + INTERVAL '10 days' -- Adjust the interval for future predictions
+                )
+                SELECT
+                    *
+                FROM
+                    ema
+                ORDER BY
+                    timestamp;
+
+            '''
+        cursor.execute(query, [symbol, start_date, end_date, start_date, end_date])
+        cov_percentage = cursor.fetchone()[0]
+
+    
+    return JsonResponse(cov_percentage, safe=False)

@@ -16,16 +16,9 @@ const StockGraph = ({ symbol }) => {
   }, [symbol, interval]);
 
   const getData = async () => {
-    // Use a static date for testing
-    const staticToday = new Date("2018-02-08");
-    const startDate = new Date(staticToday);
-    startDate.setMonth(startDate.getMonth() - 1);
-
     setLoading(true);
     await fetch(
-      `http://127.0.0.1:8000/stock-performance/?symbol=${symbol}&start_date=${
-        startDate.toISOString().split("T")[0]
-      }&end_date=${staticToday.toISOString().split("T")[0]}`
+      `http://127.0.0.1:8000/stock-performance/?symbol=${symbol}&interval=month`
     )
       .then((response) => response.json())
       .then((data) => {
@@ -81,6 +74,7 @@ const StockGraph = ({ symbol }) => {
               },
             ]}
             sx={{ color: "white" }}
+            loading={loading}
           ></LineChart>
         )}
       </div>

@@ -2,7 +2,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.models import User
-from .models import Friends, Stock, StockPerformance, StockList, StockListItem,IsAccessibleBy
+from .models import CashAccount, Friends, Portfolio, Purchase, Stock, StockHolding, StockPerformance, StockList, StockListItem,IsAccessibleBy
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -75,4 +75,33 @@ class IsAccessibleBySerializer(serializers.ModelSerializer):
     class Meta:
         model = IsAccessibleBy
         fields = ['slid', 'user']
+
+class CashAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CashAccount
+        fields = ['acc_id', 'balance']
+
+class PortfolioSerializer(serializers.ModelSerializer):
+    cash_account = CashAccountSerializer(read_only=True)
+    
+    class Meta:
+        model = Portfolio
+        fields = ['pid', 'pname', 'user', "cash_account"]
+
+class StockHoldingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockHolding
+        fields = ['pid', 'symbol', 'shares_owned']
+
+
+
+# class HasAccountSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = HasAccount
+#         fields = ['pid', 'account']
+
+class PurchaseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Purchase
+        fields = ['purchase_id', 'timestamp', 'quantity', 'purchase_price', 'user', 'symbol']
     
