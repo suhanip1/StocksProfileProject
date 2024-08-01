@@ -95,8 +95,7 @@ class StockListAccessibleBy(models.Model):
     # FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE CASCADE ON UPDATE CASCADE);
     slid = models.ForeignKey(StockList, on_delete=models.CASCADE)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    
     class Meta:
         unique_together = ('slid', 'user')
 
