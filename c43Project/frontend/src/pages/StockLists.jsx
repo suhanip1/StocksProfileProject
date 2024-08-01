@@ -56,8 +56,9 @@ function StockLists() {
     navigate("/");
   };
 
-  const handleOpenUserMenu = (event, id, slname, visibility) => {
+  const handleOpenUserMenu = (event, id, slname, visibility, stockList) => {
     setAnchorElUser(event.currentTarget);
+    setCurrentStockList(stockList)
     setSlid(id);
     setSl_name(slname);
     setVisibility(visibility);
@@ -100,7 +101,6 @@ function StockLists() {
   };
 
   const handleShare = (stockList) => {
-    setCurrentStockList(stockList);
     setOpenShareDialog(true);
   };
 
@@ -114,12 +114,10 @@ function StockLists() {
   };
 
   const handleSeeRatings = (stockList) => {
-    setCurrentStockList(stockList);
     setOpenRatingsDialog(true);
   };
 
   const handleRatingsDialogClose = () => {
-    console.log("JJJJJJJJJJJJJJJ")
     setOpenRatingsDialog(false);
   };
 
@@ -190,7 +188,8 @@ function StockLists() {
                   event,
                   item.slid,
                   item.sl_name,
-                  item.visibility
+                  item.visibility,
+                  item
                 )
               }
             >
@@ -221,8 +220,8 @@ function StockLists() {
               <MenuItem key={"Share"} onClick={() => handleShare(item)}>
                 <Typography textAlign="center">{"Share"}</Typography>
               </MenuItem>
-              <MenuItem key={"See Ratings"} onClick={() => handleSeeRatings(item)}>
-                <Typography textAlign="center">{"See Ratings"}</Typography>
+              <MenuItem key={"See Reviews"} onClick={() => handleSeeRatings(item)}>
+                <Typography textAlign="center">{"See Reviews"}</Typography>
               </MenuItem>
             </Menu>
           </Stack>

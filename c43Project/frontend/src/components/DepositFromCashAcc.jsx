@@ -16,56 +16,53 @@ import {
   Alert,
   IconButton,
   TextField,
+  InputLabel,
+  InputAdornment,
 } from "@mui/material";
-import RemoveIcon from "@mui/icons-material/Remove";
-
-import AddIcon from "@mui/icons-material/Add";
-
+import { NumericFormat } from "react-number-format";
 import api from "../api";
-import host from "../utils/links";
+import { CustomOutlinedInput } from "./DepositFromBankAccDialog";
 
-function AddToStockList({ open, handleClose, symbol }) {
-  const [shares, setShares] = React.useState(0);
+function DepositCashAcc({ open, handleClose, onSave, pid }) {
+  const [amount, setAmount] = React.useState(null);
   const [selectedValue, setSelectedValue] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [openSnackbar, setOpenSnackbar] = React.useState(false);
   const [snackSeverity, setSnackSeverity] = React.useState("success");
-  const [stockLists, setStockLists] = React.useState([]);
+  const [portfolio, setPortfolio] = React.useState([]);
 
   React.useEffect(() => {
-    getStockLists();
+    getPortfolio();
   }, []);
 
-  const getStockLists = async () => {
+  const getPortfolio = async () => {
     try {
-      const response = await api.get("/stocklists/", {
+      const response = await api.get("/portfolio/", {
         headers: {
           "Content-Type": "application/json",
         },
       });
-      setStockLists(response.data);
+      setPortfolio(response.data);
     } catch (error) {
-      console.error("Error fetching stock lists:", error.response.data);
+      console.error("Error fetching portfolios", error.response.data);
     }
   };
 
   const handleSubmit = async () => {
-    if (selectedValue != "" && shares != 0) {
+    if (selectedValue != "" && amount != 0 && amount) {
       console.log(selectedValue);
-      const data = {
-        slid: selectedValue,
-        symbol: symbol,
-        shares: shares,
-      };
       try {
-        const response = await api.post("/stocklistitems/add-or-update/", data);
+        const response = await api.post(
+          `cash-account/transfer/${pid}/${selectedValue}/${amount.toString()}`
+        );
         console.log("Success:", response.data);
-        setMessage(`Successfully added ${shares} shares of ${symbol}!`);
+        setMessage(`Successfully deposited $${amount}!`);
         setSnackSeverity("success");
         setOpenSnackbar(true);
+        if (onSave) onSave();
       } catch (error) {
         console.error("Error:", error);
-        setMessage(`Error when adding ${shares} shares of ${symbol}!`);
+        setMessage(`Error when depositing!`);
         setSnackSeverity("error");
         setOpenSnackbar(true);
       }
@@ -73,9 +70,9 @@ function AddToStockList({ open, handleClose, symbol }) {
       handleClose();
     } else {
       if (selectedValue == "") {
-        setMessage("Please select a stock list to add to");
+        setMessage("Please select a portfolio to transfer from");
       } else {
-        setMessage("Please provide a number of shares to add");
+        setMessage("Please enter an amount to transfer");
       }
 
       setSnackSeverity("error");
@@ -95,60 +92,52 @@ function AddToStockList({ open, handleClose, symbol }) {
   return (
     <div>
       <Dialog open={open} onClose={handleClose}>
-        <DialogTitle>Add to Stock List</DialogTitle>
+        <DialogTitle>Deposit from Other Cash Account</DialogTitle>
         <DialogContent>
           <Stack spacing={1}>
-            <DialogContentText>Select a Stock List:</DialogContentText>
+            <DialogContentText>Select a Portfolio:</DialogContentText>
             <FormControl sx={{ m: 1, minWidth: 120 }}>
               <Select
                 value={selectedValue}
                 onChange={handleChange}
                 displayEmpty
               >
-                {stockLists.map((stockList) => (
-                  <MenuItem key={stockList.slid} value={stockList.slid}>
-                    {stockList.sl_name}
-                  </MenuItem>
-                ))}
+                {portfolio.map(
+                  (portfolio) =>
+                    portfolio.pid != pid && (
+                      <MenuItem key={portfolio.pid} value={portfolio.pid}>
+                        {portfolio.pname}
+                      </MenuItem>
+                    )
+                )}
               </Select>
             </FormControl>
-            <DialogContentText>Select the number of shares:</DialogContentText>
-            <Stack
-              direction={"row"}
-              sx={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
+            <DialogContentText>Amount to deposit: </DialogContentText>
+            <FormControl
+              fullWidth
+              sx={{ m: 1 }}
+              value={amount}
+              onChange={(e) => {
+                setAmount(Number(e.target.value));
               }}
-              spacing={1}
             >
-              <IconButton
-                size="small"
-                sx={{ maxHeight: "35px" }}
-                onClick={() => {
-                  shares > 0 && setShares(shares - 1);
+              <NumericFormat
+                customInput={CustomOutlinedInput}
+                id="outlined-adornment-amount"
+                value={amount}
+                onValueChange={(values) => {
+                  setAmount(values.value);
                 }}
-                disabled={shares == 0}
-              >
-                <RemoveIcon />
-              </IconButton>
-              <TextField
-                id="outlined-basic"
-                variant="outlined"
-                value={shares}
-                onChange={(e) => {
-                  setShares(Number(e.target.value));
+                thousandSeparator={true}
+                decimalSeparator="."
+                decimalScale={2}
+                fixedDecimalScale={true}
+                renderText={(value) => <OutlinedInput value={value} />}
+                inputProps={{
+                  "aria-label": "Amount",
                 }}
-                sx={{ maxWidth: "50px" }}
               />
-              <IconButton
-                size="small"
-                sx={{ maxHeight: "35px" }}
-                onClick={() => setShares(shares + 1)}
-              >
-                <AddIcon />
-              </IconButton>
-            </Stack>
+            </FormControl>
           </Stack>
         </DialogContent>
 
@@ -159,7 +148,7 @@ function AddToStockList({ open, handleClose, symbol }) {
             sx={{ backgroundColor: "green" }}
             variant="contained"
           >
-            Add
+            Deposit
           </Button>
         </DialogActions>
       </Dialog>
@@ -176,4 +165,4 @@ function AddToStockList({ open, handleClose, symbol }) {
     </div>
   );
 }
-export default AddToStockList;
+export default DepositCashAcc;

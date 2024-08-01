@@ -66,13 +66,16 @@ function CreateStockList({
       console.log(
         `created a stock list with name ${slname} and it is set to ${visibility}`
       );
+      setMessage(`Successfully created a stock list!`);
+      setSnackSeverity("success");
+      setOpenSnackbar(true);
       if (onSave) onSave();
     } catch (error) {
       console.error("Error creating stock list:", error);
+      setMessage(`Error creating a stock list!`);
+      setSnackSeverity("error");
+      setOpenSnackbar(true);
     }
-    setMessage(`Successfully created a stock list!`);
-    setSnackSeverity("success");
-    setOpenSnackbar(true);
   };
 
   const editSl = async (slid) => {

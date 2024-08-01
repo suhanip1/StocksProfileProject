@@ -19,7 +19,6 @@ const FriendsPage = () => {
   };
   const FindUser = async (username) => {
     try {
-      console.log(username, "blashdhshs");
       const res = await api.get(`find-username/?username=${username}`);
       //const response = await api.get(`find-user/${username}`,  {
       //  method: "GET",});
@@ -40,7 +39,6 @@ const FriendsPage = () => {
   const handleSubmit = async () => {
     try {
       const user = await FindUser(friendName);
-      console.log(user.username);
       setUser(user.username);
     } catch (error) {
       alert("no such user");
@@ -68,7 +66,6 @@ const FriendsPage = () => {
     const friendList = await api.get("get-friends/", {
       method: "GET",
     });
-    console.log(friendList.data.friends);
     friendList && setFriendList(friendList.data.friends);
   };
 
@@ -82,7 +79,6 @@ const FriendsPage = () => {
     const friendList = await api.get("get-pending-friends/", {
       method: "GET",
     });
-    console.log("fndfnsfn", friendList.data);
     friendList && setPendingList(friendList.data);
   };
 

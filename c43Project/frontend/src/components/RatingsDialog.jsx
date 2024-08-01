@@ -29,7 +29,7 @@ function RatingsDialog({ open, onClose, stockList, bool }) {
       setRatings(response.data);
       console.log(response.data)
     } catch (error) {
-      console.error("Error fetching ratings:", error.response.data);
+      console.error("Error fetching reviews:", error.response.data);
     }
   };
   
@@ -46,13 +46,13 @@ function RatingsDialog({ open, onClose, stockList, bool }) {
       }
       setRatings((prevRatings) => prevRatings.filter(rating => rating.slid !== slid));
     } catch (error) {
-      console.error("Error deleting rating:", error.response.data);
+      console.error("Error deleting reviews:", error.response.data);
     }
   };
 
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogTitle>Ratings for {stockList?.sl_name}</DialogTitle>
+      <DialogTitle>Reviews for {stockList?.sl_name}</DialogTitle>
       <DialogContent>
         {ratings.length > 0 ? (
           <List>
@@ -82,7 +82,7 @@ function RatingsDialog({ open, onClose, stockList, bool }) {
             ))}
           </List>
         ) : (
-          <Typography>No ratings available</Typography>
+          <Typography>No Reviews available</Typography>
         )}
       </DialogContent>
       <DialogActions>

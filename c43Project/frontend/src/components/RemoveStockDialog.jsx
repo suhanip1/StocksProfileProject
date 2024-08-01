@@ -24,68 +24,102 @@ import AddIcon from "@mui/icons-material/Add";
 import api from "../api";
 import host from "../utils/links";
 
-function AddToStockList({ open, handleClose, symbol }) {
+function RemoveStock({
+  open,
+  handleClose,
+  onSave,
+  id,
+  symbol,
+  curr_shares,
+  sell,
+}) {
   const [shares, setShares] = React.useState(0);
-  const [selectedValue, setSelectedValue] = React.useState("");
   const [message, setMessage] = React.useState("");
   const [openSnackbar, setOpenSnackbar] = React.useState(false);
   const [snackSeverity, setSnackSeverity] = React.useState("success");
-  const [stockLists, setStockLists] = React.useState([]);
+  const [price, setPrice] = React.useState(0);
+  const [totalEarnings, setTotalEarnings] = React.useState(0);
+
+  //React.useEffect(() => {
+   // if (sell) {
+  //    getPrice();
+   // }
+  //}//, [symbol]);
 
   React.useEffect(() => {
-    getStockLists();
-  }, []);
+    if (sell) {
+      getPrice();
+    }
+    getTotalEarnings();
 
-  const getStockLists = async () => {
+  }, [shares, symbol, price]);
+
+  const getTotalEarnings =  () => {
+    const earnings = shares * price;
+    setTotalEarnings(earnings.toFixed(2));
+  };
+
+  const getPrice = async () => {
     try {
-      const response = await api.get("/stocklists/", {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      setStockLists(response.data);
+      const response = await api.get(`strike-price/${symbol}/`);
+      setPrice(response.data.strike_price);
     } catch (error) {
-      console.error("Error fetching stock lists:", error.response.data);
+      console.error("Error getting strike price", error.response.data);
     }
   };
 
   const handleSubmit = async () => {
-    if (selectedValue != "" && shares != 0) {
-      console.log(selectedValue);
-      const data = {
-        slid: selectedValue,
-        symbol: symbol,
-        shares: shares,
-      };
-      try {
-        const response = await api.post("/stocklistitems/add-or-update/", data);
-        console.log("Success:", response.data);
-        setMessage(`Successfully added ${shares} shares of ${symbol}!`);
-        setSnackSeverity("success");
-        setOpenSnackbar(true);
-      } catch (error) {
-        console.error("Error:", error);
-        setMessage(`Error when adding ${shares} shares of ${symbol}!`);
+    if (!sell) {
+      if (shares != 0) {
+        try {
+          const response = await api.post(
+            `remove-stock-list-item/${id}/${symbol}/${shares}/`
+          );
+          setMessage(`Successfully removed ${shares} shares of ${symbol}!`);
+          setSnackSeverity("success");
+          setOpenSnackbar(true);
+          if (onSave) onSave();
+        } catch (error) {
+          console.error("Error:", error);
+          setMessage(`Error when removing ${shares} shares of ${symbol}!`);
+          setSnackSeverity("error");
+          setOpenSnackbar(true);
+        }
+
+        handleClose();
+      } else {
+        setMessage("Please provide a number of shares to remove");
+
         setSnackSeverity("error");
         setOpenSnackbar(true);
+        return;
       }
-
-      handleClose();
     } else {
-      if (selectedValue == "") {
-        setMessage("Please select a stock list to add to");
+      if (shares != 0) {
+        try {
+          const response = await api.post(
+            `sell-stock/${id}/${symbol}/${shares}/`
+          );
+          setMessage(`Successfully sold ${shares} shares of ${symbol}!`);
+          setSnackSeverity("success");
+          setOpenSnackbar(true);
+          if (onSave) onSave();
+        } catch (error) {
+          console.error("Error:", error);
+          setMessage(`Error when removing ${shares} shares of ${symbol}!`);
+          setSnackSeverity("error");
+          setOpenSnackbar(true);
+        }
+
+        handleClose();
       } else {
-        setMessage("Please provide a number of shares to add");
+        setMessage("Please provide a number of shares to remove");
+
+        setSnackSeverity("error");
+        setOpenSnackbar(true);
+        return;
       }
-
-      setSnackSeverity("error");
-      setOpenSnackbar(true);
-      return;
     }
-  };
-
-  const handleChange = (event) => {
-    setSelectedValue(event.target.value);
   };
 
   const handleCloseSnackbar = (event) => {
@@ -95,24 +129,14 @@ function AddToStockList({ open, handleClose, symbol }) {
   return (
     <div>
       <Dialog open={open} onClose={handleClose}>
-        <DialogTitle>Add to Stock List</DialogTitle>
+        <DialogTitle>
+          {sell ? "sell" : "remove"} {symbol}
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={1}>
-            <DialogContentText>Select a Stock List:</DialogContentText>
-            <FormControl sx={{ m: 1, minWidth: 120 }}>
-              <Select
-                value={selectedValue}
-                onChange={handleChange}
-                displayEmpty
-              >
-                {stockLists.map((stockList) => (
-                  <MenuItem key={stockList.slid} value={stockList.slid}>
-                    {stockList.sl_name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <DialogContentText>Select the number of shares:</DialogContentText>
+            <DialogContentText>
+              Select the number of shares to {sell ? "sell" : "remove"}:
+            </DialogContentText>
             <Stack
               direction={"row"}
               sx={{
@@ -144,11 +168,17 @@ function AddToStockList({ open, handleClose, symbol }) {
               <IconButton
                 size="small"
                 sx={{ maxHeight: "35px" }}
-                onClick={() => setShares(shares + 1)}
+                onClick={() => shares < curr_shares && setShares(shares + 1)}
+                disabled={shares == curr_shares}
               >
                 <AddIcon />
               </IconButton>
             </Stack>
+            {sell && (
+              <DialogContentText>
+                Total earnings: ${totalEarnings}
+              </DialogContentText>
+            )}
           </Stack>
         </DialogContent>
 
@@ -159,7 +189,7 @@ function AddToStockList({ open, handleClose, symbol }) {
             sx={{ backgroundColor: "green" }}
             variant="contained"
           >
-            Add
+            {sell ? "sell" : "remove"} {symbol}
           </Button>
         </DialogActions>
       </Dialog>
@@ -176,4 +206,4 @@ function AddToStockList({ open, handleClose, symbol }) {
     </div>
   );
 }
-export default AddToStockList;
+export default RemoveStock;
