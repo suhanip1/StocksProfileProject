@@ -3,11 +3,33 @@ from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
+# CREATE TABLE User(
+# uid INT, 
+# fname VARCHAR(20), 
+# lname VARCHAR(20), 
+# username VARCHAR(30) UNIQUE, 
+# email VARCHAR(30) UNIQUE, 
+# password VARCHAR(15), 
+# dateJoined TIMESTAMP, 
+# PRIMARY KEY(uid));
+
+
 class Friends(models.Model):
-    # CREATE TABLE Friends(receiverId INT, requesterId INT, reqStatus VARCHAR(10), timeOfRejection TIMESTAMP DEFAULT NULL, 
-    # CHECK (reqStatus in ['accepted', 'pending', 'rejected']), PRIMARY KEY(receiverId, requesterId), 
-    # FOREIGN KEY (receiverId) REFERENCES Client(uid) ON DELETE CASCADE ON UPDATE CASCADE,
-    # FOREIGN KEY (requesterId) REFERENCES Client(uid) ON DELETE CASCADE ON UPDATE CASCADE);
+#     CREATE TABLE Friends(
+#     receiver_id INT,
+#     requester_id INT,
+#     req_status VARCHAR(10) DEFAULT 'pending',
+#     time_of_rejection TIMESTAMP DEFAULT NULL,
+#     CHECK (req_status IN ('accepted', 'pending', 'rejected')),
+#     PRIMARY KEY(receiver_id, requester_id),
+#     FOREIGN KEY (receiver_id) REFERENCES User(uid) ON DELETE   
+#      CASCADE ON UPDATE CASCADE,
+#     FOREIGN KEY (requester_id) REFERENCES Client(uid) ON DELETE 
+#      CASCADE ON UPDATE CASCADE,
+#     UNIQUE (requester_id, receiver_id),
+#     UNIQUE (receiver_id, requester_id)
+#  );
+
 
     PENDING = "Pending"
     ACCEPTED = "Accepted"
@@ -41,8 +63,7 @@ class Stock(models.Model):
 
 class StockPerformance(models.Model):
     # CREATE TABLE StockPerformance(timestamp DATE, open REAL, high REAL, low REAL, 
-    # close REAL, volume INT, symbol VARCHAR(5), PRIMARY KEY(symbol, timestamp), 
-    # FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE CASCADE ON UPDATE CASCADE);;
+    # close REAL, volume INT, symbol VARCHAR(5), PRIMARY KEY(symbol, timestamp));
 
     timestamp = models.DateField()
     open = models.FloatField(null=True, blank=True)
@@ -50,7 +71,6 @@ class StockPerformance(models.Model):
     low = models.FloatField(null=True, blank=True)
     close = models.FloatField(null=True, blank=True)
     volume = models.IntegerField()
-    # symbol = models.ForeignKey(Stock, on_delete=models.SET_NULL, null=True)
     symbol = models.CharField(max_length=5)
 
     class Meta:
@@ -95,7 +115,7 @@ class StockListAccessibleBy(models.Model):
     # FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE CASCADE ON UPDATE CASCADE);
     slid = models.ForeignKey(StockList, on_delete=models.CASCADE)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    
+
     class Meta:
         unique_together = ('slid', 'user')
 
@@ -121,9 +141,9 @@ class Portfolio(models.Model):
         return self.pname
 
 class StockHolding(models.Model):
-    # "CREATE TABLE StockHoldings(pid INT, symbol VARCHAR(5), sharesOwned INT, PRIMARY KEY(pid, symbol),
+    # CREATE TABLE StockHoldings(pid INT, symbol VARCHAR(5), shares_owned INT, PRIMARY KEY(pid, symbol),
     # FOREIGN KEY (pid) REFERENCES Portfolio(pid) ON DELETE CASCADE ON UPDATE CASCADE,
-    # FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE CASCADE ON UPDATE CASCADE);"
+    # FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE CASCADE ON UPDATE CASCADE);
 
     pid = models.ForeignKey(Portfolio, on_delete=models.CASCADE)
     symbol = models.ForeignKey(Stock, on_delete=models.CASCADE)
@@ -153,6 +173,9 @@ class Purchase(models.Model):
 
 
 class Review(models.Model):
+    #"CREATE TABLE Review(id INT, slid INT, uid INT, reviewText VARCHAR(4000), reviewDate TIMESTAMP, 
+    # PRIMARY KEY(id), FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE CASCADE ON UPDATE CASCADE, 
+    # FOREIGN KEY (uid) REFERENCES User(uid) ON DELETE CASCADE ON UPDATE CASCADE););";
     slid = models.ForeignKey(StockList, on_delete=models.CASCADE)
     uid = models.ForeignKey(User, on_delete=models.CASCADE)
     reviewText = models.TextField(max_length=4000)

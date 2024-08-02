@@ -94,7 +94,6 @@ def get_our_pending_requests(request):
 
 @api_view(['POST'])
 def send_friend_request(request, username):
-    print(username)
     requester = request.user
     receiver = get_object_or_404(User, username=username)
 
@@ -119,7 +118,6 @@ def send_friend_request(request, username):
             minutes_remaining = time_remaining.total_seconds() // 60
             if timezone.now() >= friends.time_of_rejection + timedelta(minutes=5):
                 friends.req_status = Friends.PENDING
-                print(friends.req_status)
                 friends.time_of_rejection = None
                 friends.save()
                 return Response({'message': 'Friend request sent successfully.'}, status=status.HTTP_201_CREATED)
@@ -158,6 +156,7 @@ def stock_performance(request):
         return JsonResponse({'error': 'Missing parameters'}, status=400)
     
     with connection.cursor() as cursor:
+        # set current date as the max_date in stockperformance
         cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
         max_date = cursor.fetchone()[0]
 
@@ -166,6 +165,7 @@ def stock_performance(request):
 
         end_date = max_date
 
+        # get start date
         if interval == 'week':
             start_date = end_date - timedelta(weeks=1)
         elif interval == 'month':
@@ -180,6 +180,7 @@ def stock_performance(request):
         else:
             return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
 
+        # get all data for symbol between start date and end date
         query = '''
         SELECT timestamp, close
         FROM stocksapp_stockperformance
@@ -209,6 +210,7 @@ def predict_prices(request, symbol, pastInterval, futureInterval):
     days = intervals[futureInterval]
 
     with connection.cursor() as cursor:
+        # current date
         cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
         max_date = cursor.fetchone()[0]
 
@@ -217,6 +219,7 @@ def predict_prices(request, symbol, pastInterval, futureInterval):
 
         end_date = max_date
 
+        # start date
         if pastInterval == 'week':
             start_date = end_date - timedelta(weeks=1)
         elif pastInterval == 'month':
@@ -231,6 +234,10 @@ def predict_prices(request, symbol, pastInterval, futureInterval):
         else:
             return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
         
+        # 1. get the dates we are calculating the predicted prices for
+        # 2. get the returns for the given symbol and the returns for the index
+        # 3. calculate the beta and average return of the given symbol
+        # 4. use (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) as formula for predicted prices
         cursor.execute(f"""
         WITH RECURSIVE future_dates AS (
             SELECT 
@@ -359,8 +366,6 @@ class StockListCreateView(generics.CreateAPIView):
 
 class StockListView(generics.ListAPIView):
     # SELECT * FROM StockLists WHERE uid=self.request.user
-
-
     queryset = StockList.objects.all()
     serializer_class = StockListSerializer
     permission_classes = [IsAuthenticated]
@@ -369,6 +374,7 @@ class StockListView(generics.ListAPIView):
         return StockList.objects.filter(user=self.request.user)
     
 class StockListEditView(APIView):
+    # edit the stocklist name and/or visibility
     permission_classes = [IsAuthenticated]
 
     def put(self, request, slid, visibility, sl_name = ""):
@@ -389,15 +395,12 @@ class StockListDeleteView(APIView):
         stock_list = get_object_or_404(StockList, pk=slid)
         stock_list.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-        # with connection.cursor() as cursor:
-        #     cursor.execute("DELETE FROM stocksapp_stocklist WHERE slid = %s", [slid])
-        
-        # return Response(status=status.HTTP_204_NO_CONTENT)
     
 class StockListItemAddOrUpdateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        # add/update number of shares of a stock in the stocklist 
         slid = request.data.get('slid')
         symbol = request.data.get('symbol')
         shares = int(request.data.get('shares'))
@@ -429,6 +432,7 @@ class StockListItemAddOrUpdateView(APIView):
 
 @api_view(['POST'])
 def remove_stock_list_item(request, slid, symbol, shares):
+    # removing shares of a stock from a stock list
     try:
         shares = int(shares)
         if shares <= 0:
@@ -479,6 +483,7 @@ def remove_stock_list_item(request, slid, symbol, shares):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class StocklistMarketValueView(APIView):
+    # get the market value of the stock list
     permission_classes = [IsAuthenticated]
 
     def get(self, request, slid):
@@ -498,6 +503,7 @@ class StocklistMarketValueView(APIView):
             return JsonResponse({'error': 'Portfolio not found'}, status=404)    
 
 class StockView(APIView):
+    # searching for a stock, get all stocks that start with the provided string
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -515,6 +521,7 @@ class StockView(APIView):
 
 
 class GetStrikePriceView(APIView):
+    # get current strike price of a stock
     permission_classes = [IsAuthenticated]
 
     def get(self, request, symbol):
@@ -537,7 +544,7 @@ class StockListItemView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, slid):
-        ### get all the information from stocklistitem and strikeprice of the symbol
+        # get all the information from stocklistitem and strikeprice of the symbol
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT sli.slid_id, sli.symbol_id, sli.shares, s.strike_price
@@ -559,9 +566,9 @@ class PortfolioCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
+        # INSERT INTO Portfolio(pid, pname, uid, accId) VALUES (pid, pname, user, cash_account)
         user = self.request.user
         cash_account = CashAccount.objects.create(balance=0.00)  # Create a new CashAccount
-        print(cash_account)
         serializer.save(user=user, cash_account=cash_account)  # Save the Portfolio with the new CashAccount
 
 class PortfolioView(generics.ListAPIView):
@@ -577,6 +584,7 @@ class PortfolioEditView(APIView):
     permission_classes = [IsAuthenticated]
 
     def put(self, request, pid, pname = ""):
+        # edit the name of the portfolio
         with connection.cursor() as cursor:
             if pname != "" and pid:
                 cursor.execute("UPDATE stocksapp_portfolio SET pname = %s WHERE pid = %s", [pname, pid])
@@ -596,7 +604,7 @@ class StockHoldingsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pid):
-        ### get all the information from stockholdings and strikeprice of the symbol
+        # get all the information from stockholdings and strikeprice of the symbol
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT sh.pid_id, sh.symbol_id, sh.shares_owned, s.strike_price
@@ -615,6 +623,7 @@ class PortfolioMarketValueView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pid):
+        # get market value of portfolio
         try: 
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -654,7 +663,7 @@ class PortfolioCashTransferView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pid1, pid2, amount):
-
+        # deposit cash from another cash account
         if not (pid1 and pid2 and amount):
             return Response({"error": "Missing required fields: 'pid1', 'pid2', and 'amount' are all required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -707,7 +716,7 @@ class PortfolioCashDepositView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pid, amount):
-
+        # deposit cash from external bank account
         if not (pid and amount):
             return Response({"error": "Missing required fields: 'pid', and 'amount' are all required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -744,7 +753,7 @@ class PortfolioCashWithdrawView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pid, amount):
-
+        # withdraw cash from cash account
         if not (pid and amount):
             return Response({"error": "Missing required fields: 'pid', and 'amount' are all required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -830,7 +839,6 @@ class BuyStockView(APIView):
                         WHERE pid_id = %s AND symbol_id = %s
                     """, [pid, stock.symbol])
                     row = cursor.fetchone()
-                    print("add/update stock holding:", row)
 
                     if row:
                         shares_owned = row[0] + quantity
@@ -960,6 +968,7 @@ def stock_cov(request):
         return JsonResponse({'error': 'Missing parameters'}, status=400)
     
     with connection.cursor() as cursor:
+        # set current date as max_date in stockperformance
         cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
         max_date = cursor.fetchone()[0]
 
@@ -968,6 +977,7 @@ def stock_cov(request):
 
         end_date = max_date
 
+        # get start date
         if interval == 'week':
             start_date = end_date - timedelta(weeks=1)
         elif interval == 'month':
@@ -982,6 +992,9 @@ def stock_cov(request):
         else:
             return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
 
+        # calculate returns of the given symbol
+        # calculate average and standard deviation of the returns
+        # calculate the coefficient of variation percentage
         query = ''' WITH daily_returns AS (
                 SELECT
                     current.timestamp,
@@ -1030,6 +1043,7 @@ def stock_beta(request):
         return JsonResponse({'error': 'Missing parameters'}, status=400)
     
     with connection.cursor() as cursor:
+        # set current date as max date
         cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
         max_date = cursor.fetchone()[0]
 
@@ -1038,6 +1052,7 @@ def stock_beta(request):
 
         end_date = max_date
 
+        # start date
         if interval == 'week':
             start_date = end_date - timedelta(weeks=1)
         elif interval == 'month':
@@ -1052,6 +1067,10 @@ def stock_beta(request):
         else:
             return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
 
+        # calculate returns of the given stock 
+        # calculate returns of the index 
+        # calculate sample covariance of stock and index and the variance of index
+        #  covariance / variance AS beta
         query = ''' WITH stock_returns AS (
                         SELECT
                             current.timestamp,
@@ -1151,7 +1170,7 @@ def get_covariance_matrix(request, id, interval, type):
         else:
             return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
         
-
+        # get returns of all the stocks in the portfolio/stock list and calculate covariance of each pair of stocks
         if type == "portfolio":
             query = f"""
                     WITH stock_returns AS (
@@ -1245,7 +1264,6 @@ def get_covariance_matrix(request, id, interval, type):
         cursor.execute(query)
         results = cursor.fetchall()
 
-        print(results)
 
     # Transform results into a matrix format
     symbols = list(set([row[0] for row in results] + [row[1] for row in results]))
@@ -1256,7 +1274,6 @@ def get_covariance_matrix(request, id, interval, type):
         matrix[row[0]][row[1]] = row[2]
         matrix[row[1]][row[0]] = row[2] 
 
-    print(matrix)
 
     return JsonResponse(matrix)
 
@@ -1284,6 +1301,7 @@ def get_correlation_matrix(request, id, interval, type):
         else:
             return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
 
+        # get returns of all the stocks in the portfolio/stock list and calculate correlation of each pair of stocks
         if type == "portfolio":
             query = f"""
                 WITH stock_returns AS (
@@ -1376,8 +1394,6 @@ def get_correlation_matrix(request, id, interval, type):
         cursor.execute(query)
         results = cursor.fetchall()
 
-        print(results)
-
     # Transform results into a matrix format
     symbols = list(set([row[0] for row in results] + [row[1] for row in results]))
     symbols.sort()
@@ -1386,8 +1402,6 @@ def get_correlation_matrix(request, id, interval, type):
     for row in results:
         matrix[row[0]][row[1]] = row[2]
         matrix[row[1]][row[0]] = row[2] 
-
-    print(matrix)
 
     return JsonResponse(matrix)
 
@@ -1474,17 +1488,14 @@ def edit_review(request, slid):
         review.reviewText = review_text
         review.reviewDate = timezone.now()
         review.save()
-        print(review.reviewText)
         return Response({'message': 'Review updated successfully'}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'message': f'Could not update review: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['DELETE'])
 def delete_review(request, slid):
-    print(slid, request.user.id)
     try:
         review = Review.objects.get(slid=slid, uid=request.user)
-        print("found review")
     except Review.DoesNotExist:
         return Response({'message': 'Review not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1497,11 +1508,9 @@ def delete_review(request, slid):
 
 @api_view(['DELETE'])
 def delete_review_of_your_stock_list(request, slid, username):
-    print(slid, username)
     try:
         user = get_object_or_404(User, username=username)
         review = Review.objects.get(slid=slid, uid= user)
-        print(review.slid)
     except Review.DoesNotExist:
         return Response({'message': 'Review not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1516,7 +1525,6 @@ def delete_review_of_your_stock_list(request, slid, username):
 def get_review(request, slid):
     uid = request.user.id
     reviews = Review.objects.filter(slid=slid,uid=uid).first()
-    print(reviews)
     serializer = ReviewSerializer(reviews, many=False)
     return Response(serializer.data)
 
