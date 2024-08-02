@@ -3,7 +3,9 @@ import json
 from django.db import IntegrityError, connection, transaction
 from django.shortcuts import render
 from rest_framework import generics
-from .models import CashAccount, Portfolio, Purchase, StockHolding, StockList, Stock, StockPerformance
+
+from .signals import clear_stockholding_matrix_cache, clear_stocklist_matrix_cache
+from .models import CashAccount, Portfolio, Purchase, StockHolding, StockList, Stock, StockListItem, StockPerformance
 from .serializers import PortfolioSerializer, StockListItemSerializer, StockPerformanceSerializer, UserSerializer, StockSerializer
 from .models import StockList, Stock, StockListAccessibleBy, Friends, Review
 from .serializers import StockListItemSerializer, StockListSerializer, UserSerializer, ReviewSerializer
@@ -20,6 +22,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import datetime, timedelta
 from django.core.exceptions import ValidationError, ObjectDoesNotExist
+from django.core.cache import cache
 
 
 class SignupView(generics.CreateAPIView):
@@ -209,150 +212,156 @@ def predict_prices(request, symbol, pastInterval, futureInterval):
 
     days = intervals[futureInterval]
 
-    with connection.cursor() as cursor:
-        # current date
-        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
-        max_date = cursor.fetchone()[0]
+    cache_key = f"predict_prices_{symbol}_{pastInterval}_{futureInterval}"
+    data = cache.get(cache_key)
 
-        if not max_date:
-            return JsonResponse({'error': 'No data available'}, status=404)
+    if not data:
+        with connection.cursor() as cursor:
+            # current date
+            cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+            max_date = cursor.fetchone()[0]
 
-        end_date = max_date
+            if not max_date:
+                return JsonResponse({'error': 'No data available'}, status=404)
 
-        # start date
-        if pastInterval == 'week':
-            start_date = end_date - timedelta(weeks=1)
-        elif pastInterval == 'month':
-            start_date = end_date - timedelta(days=30)
-        elif pastInterval == 'quarter':
-            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
-                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
-        elif pastInterval == 'year':
-            start_date = end_date.replace(year=end_date.year - 1)
-        elif pastInterval == 'five_years':
-            start_date = end_date.replace(year=end_date.year - 5)
-        else:
-            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
-        
-        # 1. get the dates we are calculating the predicted prices for
-        # 2. get the returns for the given symbol and the returns for the index
-        # 3. calculate the beta and average return of the given symbol
-        # 4. use (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) as formula for predicted prices
-        cursor.execute(f"""
-        WITH RECURSIVE future_dates AS (
+            end_date = max_date
+
+            # start date
+            if pastInterval == 'week':
+                start_date = end_date - timedelta(weeks=1)
+            elif pastInterval == 'month':
+                start_date = end_date - timedelta(days=30)
+            elif pastInterval == 'quarter':
+                start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                            year=end_date.year if end_date.month > 3 else end_date.year - 1)
+            elif pastInterval == 'year':
+                start_date = end_date.replace(year=end_date.year - 1)
+            elif pastInterval == 'five_years':
+                start_date = end_date.replace(year=end_date.year - 5)
+            else:
+                return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+            
+            # 1. get the dates we are calculating the predicted prices for
+            # 2. get the returns for the given symbol and the returns for the index
+            # 3. calculate the beta and average return of the given symbol
+            # 4. use (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) as formula for predicted prices
+            cursor.execute(f"""
+            WITH RECURSIVE future_dates AS (
+                SELECT 
+                    MAX(timestamp) + INTERVAL '1 day' AS timestamp
+                FROM 
+                    stocksapp_stockperformance
+                WHERE 
+                    symbol = %s
+                UNION ALL
+                SELECT 
+                    timestamp + INTERVAL '1 day'
+                FROM 
+                    future_dates
+                WHERE 
+                    timestamp < (SELECT MAX(timestamp) + INTERVAL %s FROM stocksapp_stockperformance WHERE symbol = %s)
+            ),
+            Returns AS (
+                SELECT
+                    current.timestamp,
+                    current.close AS stock_close,
+                    prev.close AS stock_prev_close,
+                    (current.close - prev.close) / prev.close AS return
+                FROM
+                    stocksapp_stockperformance current
+                JOIN
+                    stocksapp_stockperformance prev
+                ON
+                    current.symbol = prev.symbol
+                    AND prev.timestamp = (
+                        SELECT MAX(p.timestamp)
+                        FROM stocksapp_stockperformance p
+                        WHERE p.symbol = current.symbol
+                        AND p.timestamp < current.timestamp
+                    )
+                WHERE
+                    current.symbol = %s
+                    AND current.timestamp BETWEEN %s AND %s
+            ),
+            AvgReturn AS (
+                SELECT 
+                    AVG(return) AS avg_return
+                FROM Returns
+            ),
+            benchmark_returns AS (
+                SELECT
+                    current.timestamp,
+                    current.close AS benchmark_close,
+                    prev.close AS benchmark_prev_close,
+                    (current.close - prev.close) / prev.close AS benchmark_return
+                FROM
+                    stocksapp_stockperformance current
+                JOIN
+                    stocksapp_stockperformance prev
+                ON
+                    current.symbol = prev.symbol
+                    AND prev.timestamp = (
+                        SELECT MAX(p.timestamp)
+                        FROM stocksapp_stockperformance p
+                        WHERE p.symbol = current.symbol
+                        AND p.timestamp < current.timestamp
+                    )
+                WHERE
+                    current.symbol = 'SPY'
+                    AND current.timestamp BETWEEN %s AND %s
+            ),
+            combined_returns AS (
+                SELECT
+                    s.timestamp,
+                    s.return,
+                    b.benchmark_return
+                FROM
+                    Returns s
+                JOIN
+                    benchmark_returns b
+                ON
+                    s.timestamp = b.timestamp
+            ),
+            covariance_variance AS (
+                SELECT
+                    COVAR_SAMP(return, benchmark_return) AS covariance,
+                    VARIANCE(benchmark_return) AS variance
+                FROM
+                    combined_returns
+            ), 
+            Beta AS (
+                SELECT
+                    covariance / variance AS beta
+                FROM
+                    covariance_variance
+            ),
+            predictions AS (
+                SELECT 
+                    f.timestamp,
+                    NULL AS close,
+                    (SELECT MAX(close) FROM stocksapp_stockperformance WHERE symbol = %s) * 
+                    (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) AS predicted_price
+                FROM 
+                    future_dates f,
+                    AvgReturn a,
+                    Beta b
+            )
             SELECT 
-                MAX(timestamp) + INTERVAL '1 day' AS timestamp
+                timestamp,
+                close,
+                predicted_price
             FROM 
-                stocksapp_stockperformance
-            WHERE 
-                symbol = %s
-            UNION ALL
-            SELECT 
-                timestamp + INTERVAL '1 day'
-            FROM 
-                future_dates
-            WHERE 
-                timestamp < (SELECT MAX(timestamp) + INTERVAL %s FROM stocksapp_stockperformance WHERE symbol = %s)
-        ),
-        Returns AS (
-            SELECT
-                current.timestamp,
-                current.close AS stock_close,
-                prev.close AS stock_prev_close,
-                (current.close - prev.close) / prev.close AS return
-            FROM
-                stocksapp_stockperformance current
-            JOIN
-                stocksapp_stockperformance prev
-            ON
-                current.symbol = prev.symbol
-                AND prev.timestamp = (
-                    SELECT MAX(p.timestamp)
-                    FROM stocksapp_stockperformance p
-                    WHERE p.symbol = current.symbol
-                    AND p.timestamp < current.timestamp
-                )
-            WHERE
-                current.symbol = %s
-                AND current.timestamp BETWEEN %s AND %s
-        ),
-        AvgReturn AS (
-            SELECT 
-                AVG(return) AS avg_return
-            FROM Returns
-        ),
-        benchmark_returns AS (
-            SELECT
-                current.timestamp,
-                current.close AS benchmark_close,
-                prev.close AS benchmark_prev_close,
-                (current.close - prev.close) / prev.close AS benchmark_return
-            FROM
-                stocksapp_stockperformance current
-            JOIN
-                stocksapp_stockperformance prev
-            ON
-                current.symbol = prev.symbol
-                AND prev.timestamp = (
-                    SELECT MAX(p.timestamp)
-                    FROM stocksapp_stockperformance p
-                    WHERE p.symbol = current.symbol
-                    AND p.timestamp < current.timestamp
-                )
-            WHERE
-                current.symbol = 'SPY'
-                AND current.timestamp BETWEEN %s AND %s
-        ),
-        combined_returns AS (
-            SELECT
-                s.timestamp,
-                s.return,
-                b.benchmark_return
-            FROM
-                Returns s
-            JOIN
-                benchmark_returns b
-            ON
-                s.timestamp = b.timestamp
-        ),
-        covariance_variance AS (
-            SELECT
-                COVAR_SAMP(return, benchmark_return) AS covariance,
-                VARIANCE(benchmark_return) AS variance
-            FROM
-                combined_returns
-        ), 
-        Beta AS (
-            SELECT
-                covariance / variance AS beta
-            FROM
-                covariance_variance
-        ),
-        predictions AS (
-            SELECT 
-                f.timestamp,
-                NULL AS close,
-                (SELECT MAX(close) FROM stocksapp_stockperformance WHERE symbol = %s) * 
-                (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) AS predicted_price
-            FROM 
-                future_dates f,
-                AvgReturn a,
-                Beta b
-        )
-        SELECT 
-            timestamp,
-            close,
-            predicted_price
-        FROM 
-            predictions
-        WHERE timestamp > (SELECT MAX(timestamp) FROM stocksapp_stockperformance WHERE symbol = %s)
-        ORDER BY 
-            Timestamp;
-        """, [symbol, days, symbol, symbol, start_date, end_date, start_date, end_date, symbol, symbol])
+                predictions
+            WHERE timestamp > (SELECT MAX(timestamp) FROM stocksapp_stockperformance WHERE symbol = %s)
+            ORDER BY 
+                Timestamp;
+            """, [symbol, days, symbol, symbol, start_date, end_date, start_date, end_date, symbol, symbol])
 
-        rows = cursor.fetchall()
+            rows = cursor.fetchall()
 
-    data = [{'timestamp': row[0], 'close': row[2]} for row in rows]
+        data = [{'timestamp': row[0], 'close': row[2]} for row in rows]
+        cache.set(cache_key, data)
+
     return JsonResponse(data, safe=False)
 
 class StockListCreateView(generics.CreateAPIView):
@@ -425,6 +434,10 @@ class StockListItemAddOrUpdateView(APIView):
                     cursor.execute("INSERT INTO stocksapp_stocklistitem (slid_id, symbol_id, shares) VALUES (%s, %s, %s)", [slid, symbol, shares])
                     operation = "created"
 
+                    # Manually trigger signal
+                    instance = StockListItem.objects.get(slid=slid, symbol = symbol) 
+                    clear_stocklist_matrix_cache(sender=StockListItem, instance=instance, created=True)
+
             return Response({"status": f"StockListItem successfully {operation}"}, status=status.HTTP_200_OK if row else status.HTTP_201_CREATED)
 
         except Exception as e:
@@ -461,6 +474,10 @@ def remove_stock_list_item(request, slid, symbol, shares):
                     return Response({"error": "Not enough shares to remove."}, status=status.HTTP_400_BAD_REQUEST)
 
                 if current_shares == shares:
+                    # Manually trigger signal
+                    instance = StockListItem.objects.get(slid=slid, symbol = symbol)
+                    clear_stocklist_matrix_cache(sender=StockListItem, instance=instance)
+
                     # Delete the stock list item if shares to remove are equal to the existing shares
                     cursor.execute("""
                         DELETE FROM stocksapp_stocklistitem
@@ -615,9 +632,9 @@ class StockHoldingsView(APIView):
             rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description]
         
-        stocklistitem = [dict(zip(columns, row)) for row in rows]
+        stockholdings = [dict(zip(columns, row)) for row in rows]
         
-        return Response(stocklistitem, status=status.HTTP_200_OK)
+        return Response(stockholdings, status=status.HTTP_200_OK)
     
 class PortfolioMarketValueView(APIView):
     permission_classes = [IsAuthenticated]
@@ -809,6 +826,8 @@ class BuyStockView(APIView):
         strike_price = round(stock.strike_price, 2)
         total_price = round(strike_price * quantity, 2)
 
+        create = False
+
         with connection.cursor() as cursor:
             try:
                 with transaction.atomic():
@@ -852,6 +871,8 @@ class BuyStockView(APIView):
                             INSERT INTO stocksapp_stockholding (pid_id, symbol_id, shares_owned)
                             VALUES (%s, %s, %s)
                         """, [pid, stock.symbol, quantity])
+                        instance = StockHolding.objects.get(pid=pid, symbol = symbol) 
+                        clear_stockholding_matrix_cache(sender=StockHolding, instance=instance, created=True)       
 
                     # Insert into purchases
                     timestamp = timezone.now()
@@ -862,6 +883,7 @@ class BuyStockView(APIView):
 
             except Exception as e:
                 return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
 
         return Response({"status": "Stock purchase successful"}, status=status.HTTP_200_OK)
     
@@ -876,6 +898,7 @@ class SellStockView(APIView):
         except ValueError:
             return Response({"error": "Shares must be a valid integer."}, status=400)
 
+        delete = False
         with connection.cursor() as cursor:
             try:
                 with transaction.atomic():
@@ -909,10 +932,15 @@ class SellStockView(APIView):
                             WHERE pid_id = %s AND symbol_id = %s
                         """, [new_shares, pid, symbol])
                     else:
+                        # Manually trigger signal
+                        instance = StockHolding.objects.get(pid=pid, symbol = symbol) 
+                        clear_stockholding_matrix_cache(sender=StockHolding, instance=instance)
                         cursor.execute("""
                             DELETE FROM stocksapp_stockholding
                             WHERE pid_id = %s AND symbol_id = %s
                         """, [pid, symbol])
+
+                        delete = True
 
                     # Update the cash account balance
                     cursor.execute("""
@@ -967,70 +995,76 @@ def stock_cov(request):
     if not symbol or not interval:
         return JsonResponse({'error': 'Missing parameters'}, status=400)
     
-    with connection.cursor() as cursor:
-        # set current date as max_date in stockperformance
-        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
-        max_date = cursor.fetchone()[0]
+    ## cache
+    cache_key = f"cov_{symbol}_{interval}"
+    cov_percentage = cache.get(cache_key)
+    
+    if not cov_percentage:
+        with connection.cursor() as cursor:
+            # set current date as max_date in stockperformance
+            cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+            max_date = cursor.fetchone()[0]
 
-        if not max_date:
-            return JsonResponse({'error': 'No data available'}, status=404)
+            if not max_date:
+                return JsonResponse({'error': 'No data available'}, status=404)
 
-        end_date = max_date
+            end_date = max_date
 
-        # get start date
-        if interval == 'week':
-            start_date = end_date - timedelta(weeks=1)
-        elif interval == 'month':
-            start_date = end_date - timedelta(days=30)
-        elif interval == 'quarter':
-            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
-                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
-        elif interval == 'year':
-            start_date = end_date.replace(year=end_date.year - 1)
-        elif interval == 'five_years':
-            start_date = end_date.replace(year=end_date.year - 5)
-        else:
-            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+            # get start date
+            if interval == 'week':
+                start_date = end_date - timedelta(weeks=1)
+            elif interval == 'month':
+                start_date = end_date - timedelta(days=30)
+            elif interval == 'quarter':
+                start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                            year=end_date.year if end_date.month > 3 else end_date.year - 1)
+            elif interval == 'year':
+                start_date = end_date.replace(year=end_date.year - 1)
+            elif interval == 'five_years':
+                start_date = end_date.replace(year=end_date.year - 5)
+            else:
+                return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
 
-        # calculate returns of the given symbol
-        # calculate average and standard deviation of the returns
-        # calculate the coefficient of variation percentage
-        query = ''' WITH daily_returns AS (
+            # calculate returns of the given symbol
+            # calculate average and standard deviation of the returns
+            # calculate the coefficient of variation percentage
+            query = ''' WITH daily_returns AS (
+                    SELECT
+                        current.timestamp,
+                        current.close,
+                        prev.close AS prev_close,
+                        (current.close - prev.close) / prev.close AS return
+                    FROM
+                        stocksapp_stockperformance current
+                    JOIN
+                        stocksapp_stockperformance prev
+                    ON
+                        current.symbol = prev.symbol
+                        AND prev.timestamp = (
+                            SELECT MAX(p.timestamp)
+                            FROM stocksapp_stockperformance p
+                            WHERE p.symbol = current.symbol
+                            AND p.timestamp < current.timestamp
+                        )
+                    WHERE
+                        current.symbol = %s
+                        AND current.timestamp BETWEEN %s AND %s
+                ),
+                stats AS (
+                    SELECT
+                        AVG(return) AS mean_return,
+                        STDDEV(return) AS std_dev_return
+                    FROM
+                        daily_returns
+                )
                 SELECT
-                    current.timestamp,
-                    current.close,
-                    prev.close AS prev_close,
-                    (current.close - prev.close) / prev.close AS return
+                    (std_dev_return / mean_return) * 100 AS cov_percentage
                 FROM
-                    stocksapp_stockperformance current
-                JOIN
-                    stocksapp_stockperformance prev
-                ON
-                    current.symbol = prev.symbol
-                    AND prev.timestamp = (
-                        SELECT MAX(p.timestamp)
-                        FROM stocksapp_stockperformance p
-                        WHERE p.symbol = current.symbol
-                        AND p.timestamp < current.timestamp
-                    )
-                WHERE
-                    current.symbol = %s
-                    AND current.timestamp BETWEEN %s AND %s
-            ),
-            stats AS (
-                SELECT
-                    AVG(return) AS mean_return,
-                    STDDEV(return) AS std_dev_return
-                FROM
-                    daily_returns
-            )
-            SELECT
-                (std_dev_return / mean_return) * 100 AS cov_percentage
-            FROM
-                stats;
-            '''
-        cursor.execute(query, [symbol,start_date, end_date])
-        cov_percentage = cursor.fetchone()[0]
+                    stats;
+                '''
+            cursor.execute(query, [symbol,start_date, end_date])
+            cov_percentage = cursor.fetchone()[0]
+            cache.set(cache_key, cov_percentage)
 
     
     return JsonResponse(cov_percentage, safe=False)
@@ -1042,137 +1076,282 @@ def stock_beta(request):
     if not symbol or not interval:
         return JsonResponse({'error': 'Missing parameters'}, status=400)
     
-    with connection.cursor() as cursor:
-        # set current date as max date
-        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
-        max_date = cursor.fetchone()[0]
+    cache_key = f"beta_{symbol}_{interval}"
+    beta = cache.get(cache_key)
+    
+    if not beta: 
+        with connection.cursor() as cursor:
+            # set current date as max date
+            cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+            max_date = cursor.fetchone()[0]
 
-        if not max_date:
-            return JsonResponse({'error': 'No data available'}, status=404)
+            if not max_date:
+                return JsonResponse({'error': 'No data available'}, status=404)
 
-        end_date = max_date
+            end_date = max_date
 
-        # start date
-        if interval == 'week':
-            start_date = end_date - timedelta(weeks=1)
-        elif interval == 'month':
-            start_date = end_date - timedelta(days=30)
-        elif interval == 'quarter':
-            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
-                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
-        elif interval == 'year':
-            start_date = end_date.replace(year=end_date.year - 1)
-        elif interval == 'five_years':
-            start_date = end_date.replace(year=end_date.year - 5)
-        else:
-            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+            # start date
+            if interval == 'week':
+                start_date = end_date - timedelta(weeks=1)
+            elif interval == 'month':
+                start_date = end_date - timedelta(days=30)
+            elif interval == 'quarter':
+                start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                            year=end_date.year if end_date.month > 3 else end_date.year - 1)
+            elif interval == 'year':
+                start_date = end_date.replace(year=end_date.year - 1)
+            elif interval == 'five_years':
+                start_date = end_date.replace(year=end_date.year - 5)
+            else:
+                return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
 
-        # calculate returns of the given stock 
-        # calculate returns of the index 
-        # calculate sample covariance of stock and index and the variance of index
-        #  covariance / variance AS beta
-        query = ''' WITH stock_returns AS (
+            # calculate returns of the given stock 
+            # calculate returns of the index 
+            # calculate sample covariance of stock and index and the variance of index
+            #  covariance / variance AS beta
+            query = ''' WITH stock_returns AS (
+                            SELECT
+                                current.timestamp,
+                                current.close AS stock_close,
+                                prev.close AS stock_prev_close,
+                                (current.close - prev.close) / prev.close AS stock_return
+                            FROM
+                                stocksapp_stockperformance current
+                            JOIN
+                                stocksapp_stockperformance prev
+                            ON
+                                current.symbol = prev.symbol
+                                AND prev.timestamp = (
+                                    SELECT MAX(p.timestamp)
+                                    FROM stocksapp_stockperformance p
+                                    WHERE p.symbol = current.symbol
+                                    AND p.timestamp < current.timestamp
+                                )
+                            WHERE
+                                current.symbol = %s
+                                AND current.timestamp BETWEEN %s AND %s
+                        ),
+                        benchmark_returns AS (
+                            SELECT
+                                current.timestamp,
+                                current.close AS benchmark_close,
+                                prev.close AS benchmark_prev_close,
+                                (current.close - prev.close) / prev.close AS benchmark_return
+                            FROM
+                                stocksapp_stockperformance current
+                            JOIN
+                                stocksapp_stockperformance prev
+                            ON
+                                current.symbol = prev.symbol
+                                AND prev.timestamp = (
+                                    SELECT MAX(p.timestamp)
+                                    FROM stocksapp_stockperformance p
+                                    WHERE p.symbol = current.symbol
+                                    AND p.timestamp < current.timestamp
+                                )
+                            WHERE
+                                current.symbol = 'SPY'
+                                AND current.timestamp BETWEEN %s AND %s
+                        ),
+                        combined_returns AS (
+                            SELECT
+                                s.timestamp,
+                                s.stock_return,
+                                b.benchmark_return
+                            FROM
+                                stock_returns s
+                            JOIN
+                                benchmark_returns b
+                            ON
+                                s.timestamp = b.timestamp
+                        ),
+                        covariance_variance AS (
+                            SELECT
+                                COVAR_SAMP(stock_return, benchmark_return) AS covariance,
+                                VARIANCE(benchmark_return) AS variance
+                            FROM
+                                combined_returns
+                        )
                         SELECT
-                            current.timestamp,
-                            current.close AS stock_close,
-                            prev.close AS stock_prev_close,
-                            (current.close - prev.close) / prev.close AS stock_return
+                            covariance / variance AS beta
                         FROM
-                            stocksapp_stockperformance current
-                        JOIN
-                            stocksapp_stockperformance prev
-                        ON
-                            current.symbol = prev.symbol
-                            AND prev.timestamp = (
-                                SELECT MAX(p.timestamp)
-                                FROM stocksapp_stockperformance p
-                                WHERE p.symbol = current.symbol
-                                AND p.timestamp < current.timestamp
-                            )
-                        WHERE
-                            current.symbol = %s
-                            AND current.timestamp BETWEEN %s AND %s
-                    ),
-                    benchmark_returns AS (
-                        SELECT
-                            current.timestamp,
-                            current.close AS benchmark_close,
-                            prev.close AS benchmark_prev_close,
-                            (current.close - prev.close) / prev.close AS benchmark_return
-                        FROM
-                            stocksapp_stockperformance current
-                        JOIN
-                            stocksapp_stockperformance prev
-                        ON
-                            current.symbol = prev.symbol
-                            AND prev.timestamp = (
-                                SELECT MAX(p.timestamp)
-                                FROM stocksapp_stockperformance p
-                                WHERE p.symbol = current.symbol
-                                AND p.timestamp < current.timestamp
-                            )
-                        WHERE
-                            current.symbol = 'SPY'
-                            AND current.timestamp BETWEEN %s AND %s
-                    ),
-                    combined_returns AS (
-                        SELECT
-                            s.timestamp,
-                            s.stock_return,
-                            b.benchmark_return
-                        FROM
-                            stock_returns s
-                        JOIN
-                            benchmark_returns b
-                        ON
-                            s.timestamp = b.timestamp
-                    ),
-                    covariance_variance AS (
-                        SELECT
-                            COVAR_SAMP(stock_return, benchmark_return) AS covariance,
-                            VARIANCE(benchmark_return) AS variance
-                        FROM
-                            combined_returns
-                    )
-                    SELECT
-                        covariance / variance AS beta
-                    FROM
-                        covariance_variance;
-            '''
-        cursor.execute(query, [symbol, start_date, end_date, start_date, end_date])
-        cov_percentage = cursor.fetchone()[0]
+                            covariance_variance;
+                '''
+            cursor.execute(query, [symbol, start_date, end_date, start_date, end_date])
+            beta = cursor.fetchone()[0]
+            cache.set(cache_key, beta)
 
     
-    return JsonResponse(cov_percentage, safe=False)
+    return JsonResponse(beta, safe=False)
 
 def get_covariance_matrix(request, id, interval, type):
+    cache_key = f"cov_matrix_{id}_{interval}_{type}"
+    matrix = cache.get(cache_key)
 
-    with connection.cursor() as cursor:
-        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
-        max_date = cursor.fetchone()[0]
+    if not matrix:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+            max_date = cursor.fetchone()[0]
 
-        if not max_date:
-            return JsonResponse({'error': 'No data available'}, status=404)
+            if not max_date:
+                return JsonResponse({'error': 'No data available'}, status=404)
 
-        end_date = max_date
+            end_date = max_date
 
-        if interval == 'week':
-            start_date = end_date - timedelta(weeks=1)
-        elif interval == 'month':
-            start_date = end_date - timedelta(days=30)
-        elif interval == 'quarter':
-            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
-                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
-        elif interval == 'year':
-            start_date = end_date.replace(year=end_date.year - 1)
-        elif interval == 'five_years':
-            start_date = end_date.replace(year=end_date.year - 5)
-        else:
-            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+            if interval == 'week':
+                start_date = end_date - timedelta(weeks=1)
+            elif interval == 'month':
+                start_date = end_date - timedelta(days=30)
+            elif interval == 'quarter':
+                start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                            year=end_date.year if end_date.month > 3 else end_date.year - 1)
+            elif interval == 'year':
+                start_date = end_date.replace(year=end_date.year - 1)
+            elif interval == 'five_years':
+                start_date = end_date.replace(year=end_date.year - 5)
+            else:
+                return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+            
+            # get returns of all the stocks in the portfolio/stock list and calculate covariance of each pair of stocks
+            if type == "portfolio":
+                query = f"""
+                        WITH stock_returns AS (
+                            SELECT
+                                current.timestamp,
+                                current.symbol,
+                                current.close AS stock_close,
+                                prev.close AS stock_prev_close,
+                                (current.close - prev.close) / prev.close AS daily_return
+                            FROM
+                                stocksapp_StockPerformance current
+                            JOIN
+                                stocksapp_StockPerformance prev
+                            ON
+                                current.symbol = prev.symbol
+                                AND prev.timestamp = (
+                                    SELECT MAX(p.timestamp)
+                                    FROM stocksapp_StockPerformance p
+                                    WHERE p.symbol = current.symbol
+                                    AND p.timestamp < current.timestamp
+                                )
+                            WHERE
+                                current.symbol IN (
+                                    SELECT symbol_id
+                                    FROM stocksapp_stockholding
+                                    WHERE pid_id = {id}
+                                )
+                                AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
+                        )
+                        SELECT
+                            s1.symbol AS symbol1,
+                            s2.symbol AS symbol2,
+                            COVAR_SAMP(s1.daily_return, s2.daily_return) AS covariance
+                        FROM
+                            stock_returns s1
+                        JOIN
+                            stock_returns s2 ON s1.timestamp = s2.timestamp
+                        WHERE
+                            s1.symbol < s2.symbol 
+                        GROUP BY
+                            s1.symbol, s2.symbol
+                        ORDER BY
+                            s1.symbol, s2.symbol;
+                    """
+            else: 
+                query = f"""
+                    WITH stock_returns AS (
+                        SELECT
+                            current.timestamp,
+                            current.symbol,
+                            current.close AS stock_close,
+                            prev.close AS stock_prev_close,
+                            (current.close - prev.close) / prev.close AS daily_return
+                        FROM
+                            stocksapp_StockPerformance current
+                        JOIN
+                            stocksapp_StockPerformance prev
+                        ON
+                            current.symbol = prev.symbol
+                            AND prev.timestamp = (
+                                SELECT MAX(p.timestamp)
+                                FROM stocksapp_StockPerformance p
+                                WHERE p.symbol = current.symbol
+                                AND p.timestamp < current.timestamp
+                            )
+                        WHERE
+                            current.symbol IN (
+                                SELECT symbol_id
+                                FROM stocksapp_stocklistitem
+                                WHERE slid_id = {id}
+                            )
+                            AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
+                    )
+                    SELECT
+                        s1.symbol AS symbol1,
+                        s2.symbol AS symbol2,
+                        COVAR_SAMP(s1.daily_return, s2.daily_return) AS covariance
+                    FROM
+                        stock_returns s1
+                    JOIN
+                        stock_returns s2 ON s1.timestamp = s2.timestamp
+                    WHERE
+                        s1.symbol < s2.symbol 
+                    GROUP BY
+                        s1.symbol, s2.symbol
+                    ORDER BY
+                        s1.symbol, s2.symbol;
+                """    
+            
+
+            cursor.execute(query)
+            results = cursor.fetchall()
+
+
+        # Transform results into a matrix format
+        symbols = list(set([row[0] for row in results] + [row[1] for row in results]))
+        symbols.sort()
+        matrix = {symbol: {symbol: 1.0 for symbol in symbols} for symbol in symbols}
         
-        # get returns of all the stocks in the portfolio/stock list and calculate covariance of each pair of stocks
-        if type == "portfolio":
-            query = f"""
+        for row in results:
+            matrix[row[0]][row[1]] = row[2]
+            matrix[row[1]][row[0]] = row[2]
+
+        cache.set(cache_key, matrix) 
+
+
+    return JsonResponse(matrix)
+
+def get_correlation_matrix(request, id, interval, type):
+    cache_key = f"corr_matrix_{id}_{interval}_{type}"
+    matrix = cache.get(cache_key)
+
+    if not matrix:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
+            max_date = cursor.fetchone()[0]
+
+            if not max_date:
+                return JsonResponse({'error': 'No data available'}, status=404)
+
+            end_date = max_date
+
+            if interval == 'week':
+                start_date = end_date - timedelta(weeks=1)
+            elif interval == 'month':
+                start_date = end_date - timedelta(days=30)
+            elif interval == 'quarter':
+                start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
+                                            year=end_date.year if end_date.month > 3 else end_date.year - 1)
+            elif interval == 'year':
+                start_date = end_date.replace(year=end_date.year - 1)
+            elif interval == 'five_years':
+                start_date = end_date.replace(year=end_date.year - 5)
+            else:
+                return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
+
+            # get returns of all the stocks in the portfolio/stock list and calculate correlation of each pair of stocks
+            if type == "portfolio":
+                query = f"""
                     WITH stock_returns AS (
                         SELECT
                             current.timestamp,
@@ -1203,7 +1382,7 @@ def get_covariance_matrix(request, id, interval, type):
                     SELECT
                         s1.symbol AS symbol1,
                         s2.symbol AS symbol2,
-                        COVAR_SAMP(s1.daily_return, s2.daily_return) AS covariance
+                        CORR(s1.daily_return, s2.daily_return) AS correlation
                     FROM
                         stock_returns s1
                     JOIN
@@ -1215,193 +1394,64 @@ def get_covariance_matrix(request, id, interval, type):
                     ORDER BY
                         s1.symbol, s2.symbol;
                 """
-        else: 
-            query = f"""
-                WITH stock_returns AS (
+            else: 
+                query = f"""
+                    WITH stock_returns AS (
+                        SELECT
+                            current.timestamp,
+                            current.symbol,
+                            current.close AS stock_close,
+                            prev.close AS stock_prev_close,
+                            (current.close - prev.close) / prev.close AS daily_return
+                        FROM
+                            stocksapp_StockPerformance current
+                        JOIN
+                            stocksapp_StockPerformance prev
+                        ON
+                            current.symbol = prev.symbol
+                            AND prev.timestamp = (
+                                SELECT MAX(p.timestamp)
+                                FROM stocksapp_StockPerformance p
+                                WHERE p.symbol = current.symbol
+                                AND p.timestamp < current.timestamp
+                            )
+                        WHERE
+                            current.symbol IN (
+                                SELECT symbol_id
+                                FROM stocksapp_stocklistitem
+                                WHERE slid_id = {id}
+                            )
+                            AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
+                    )
                     SELECT
-                        current.timestamp,
-                        current.symbol,
-                        current.close AS stock_close,
-                        prev.close AS stock_prev_close,
-                        (current.close - prev.close) / prev.close AS daily_return
+                        s1.symbol AS symbol1,
+                        s2.symbol AS symbol2,
+                        CORR(s1.daily_return, s2.daily_return) AS correlation
                     FROM
-                        stocksapp_StockPerformance current
+                        stock_returns s1
                     JOIN
-                        stocksapp_StockPerformance prev
-                    ON
-                        current.symbol = prev.symbol
-                        AND prev.timestamp = (
-                            SELECT MAX(p.timestamp)
-                            FROM stocksapp_StockPerformance p
-                            WHERE p.symbol = current.symbol
-                            AND p.timestamp < current.timestamp
-                        )
+                        stock_returns s2 ON s1.timestamp = s2.timestamp
                     WHERE
-                        current.symbol IN (
-                            SELECT symbol_id
-                            FROM stocksapp_stocklistitem
-                            WHERE slid_id = {id}
-                        )
-                        AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
-                )
-                SELECT
-                    s1.symbol AS symbol1,
-                    s2.symbol AS symbol2,
-                    COVAR_SAMP(s1.daily_return, s2.daily_return) AS covariance
-                FROM
-                    stock_returns s1
-                JOIN
-                    stock_returns s2 ON s1.timestamp = s2.timestamp
-                WHERE
-                    s1.symbol < s2.symbol 
-                GROUP BY
-                    s1.symbol, s2.symbol
-                ORDER BY
-                    s1.symbol, s2.symbol;
-            """    
+                        s1.symbol < s2.symbol 
+                    GROUP BY
+                        s1.symbol, s2.symbol
+                    ORDER BY
+                        s1.symbol, s2.symbol;
+                """    
+
+            cursor.execute(query)
+            results = cursor.fetchall()
+
+        # Transform results into a matrix format
+        symbols = list(set([row[0] for row in results] + [row[1] for row in results]))
+        symbols.sort()
+        matrix = {symbol: {symbol: 1.0 for symbol in symbols} for symbol in symbols}
         
-
-        cursor.execute(query)
-        results = cursor.fetchall()
-
-
-    # Transform results into a matrix format
-    symbols = list(set([row[0] for row in results] + [row[1] for row in results]))
-    symbols.sort()
-    matrix = {symbol: {symbol: 1.0 for symbol in symbols} for symbol in symbols}
-    
-    for row in results:
-        matrix[row[0]][row[1]] = row[2]
-        matrix[row[1]][row[0]] = row[2] 
-
-
-    return JsonResponse(matrix)
-
-def get_correlation_matrix(request, id, interval, type):
-    with connection.cursor() as cursor:
-        cursor.execute('SELECT MAX(timestamp) FROM stocksapp_stockperformance')
-        max_date = cursor.fetchone()[0]
-
-        if not max_date:
-            return JsonResponse({'error': 'No data available'}, status=404)
-
-        end_date = max_date
-
-        if interval == 'week':
-            start_date = end_date - timedelta(weeks=1)
-        elif interval == 'month':
-            start_date = end_date - timedelta(days=30)
-        elif interval == 'quarter':
-            start_date = end_date.replace(month=end_date.month - 3 if end_date.month > 3 else end_date.month - 3 + 12, 
-                                          year=end_date.year if end_date.month > 3 else end_date.year - 1)
-        elif interval == 'year':
-            start_date = end_date.replace(year=end_date.year - 1)
-        elif interval == 'five_years':
-            start_date = end_date.replace(year=end_date.year - 5)
-        else:
-            return JsonResponse({'error': 'Invalid interval parameter'}, status=400)
-
-        # get returns of all the stocks in the portfolio/stock list and calculate correlation of each pair of stocks
-        if type == "portfolio":
-            query = f"""
-                WITH stock_returns AS (
-                    SELECT
-                        current.timestamp,
-                        current.symbol,
-                        current.close AS stock_close,
-                        prev.close AS stock_prev_close,
-                        (current.close - prev.close) / prev.close AS daily_return
-                    FROM
-                        stocksapp_StockPerformance current
-                    JOIN
-                        stocksapp_StockPerformance prev
-                    ON
-                        current.symbol = prev.symbol
-                        AND prev.timestamp = (
-                            SELECT MAX(p.timestamp)
-                            FROM stocksapp_StockPerformance p
-                            WHERE p.symbol = current.symbol
-                            AND p.timestamp < current.timestamp
-                        )
-                    WHERE
-                        current.symbol IN (
-                            SELECT symbol_id
-                            FROM stocksapp_stockholding
-                            WHERE pid_id = {id}
-                        )
-                        AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
-                )
-                SELECT
-                    s1.symbol AS symbol1,
-                    s2.symbol AS symbol2,
-                    CORR(s1.daily_return, s2.daily_return) AS correlation
-                FROM
-                    stock_returns s1
-                JOIN
-                    stock_returns s2 ON s1.timestamp = s2.timestamp
-                WHERE
-                    s1.symbol < s2.symbol 
-                GROUP BY
-                    s1.symbol, s2.symbol
-                ORDER BY
-                    s1.symbol, s2.symbol;
-            """
-        else: 
-            query = f"""
-                WITH stock_returns AS (
-                    SELECT
-                        current.timestamp,
-                        current.symbol,
-                        current.close AS stock_close,
-                        prev.close AS stock_prev_close,
-                        (current.close - prev.close) / prev.close AS daily_return
-                    FROM
-                        stocksapp_StockPerformance current
-                    JOIN
-                        stocksapp_StockPerformance prev
-                    ON
-                        current.symbol = prev.symbol
-                        AND prev.timestamp = (
-                            SELECT MAX(p.timestamp)
-                            FROM stocksapp_StockPerformance p
-                            WHERE p.symbol = current.symbol
-                            AND p.timestamp < current.timestamp
-                        )
-                    WHERE
-                        current.symbol IN (
-                            SELECT symbol_id
-                            FROM stocksapp_stocklistitem
-                            WHERE slid_id = {id}
-                        )
-                        AND current.timestamp BETWEEN '{start_date}' AND '{end_date}'
-                )
-                SELECT
-                    s1.symbol AS symbol1,
-                    s2.symbol AS symbol2,
-                    CORR(s1.daily_return, s2.daily_return) AS correlation
-                FROM
-                    stock_returns s1
-                JOIN
-                    stock_returns s2 ON s1.timestamp = s2.timestamp
-                WHERE
-                    s1.symbol < s2.symbol 
-                GROUP BY
-                    s1.symbol, s2.symbol
-                ORDER BY
-                    s1.symbol, s2.symbol;
-            """    
-
-        cursor.execute(query)
-        results = cursor.fetchall()
-
-    # Transform results into a matrix format
-    symbols = list(set([row[0] for row in results] + [row[1] for row in results]))
-    symbols.sort()
-    matrix = {symbol: {symbol: 1.0 for symbol in symbols} for symbol in symbols}
-    
-    for row in results:
-        matrix[row[0]][row[1]] = row[2]
-        matrix[row[1]][row[0]] = row[2] 
+        for row in results:
+            matrix[row[0]][row[1]] = row[2]
+            matrix[row[1]][row[0]] = row[2] 
+        
+        cache.set(cache_key, matrix)
 
     return JsonResponse(matrix)
 
