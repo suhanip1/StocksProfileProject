@@ -94,11 +94,25 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'c43project2',          # Name of the database you created
+        'NAME': 'c43project3',          # Name of the database you created
         'USER': 'postgres',              # Your PostgreSQL username
         'PASSWORD': 'sjc43project',      # Your PostgreSQL password
         'HOST': '',           # Set to empty string for localhost
+        # 'NAME': 'c43final',          # Name of the database you created
+        # 'USER': 'suhani',              # Your PostgreSQL username
+        # 'PASSWORD': 'password',      # Your PostgreSQL password
+        # 'HOST': 'localhost',           # Set to empty string for localhost
         'PORT': '5432',                # Default port for PostgreSQL
+    }
+}
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
     }
 }
 

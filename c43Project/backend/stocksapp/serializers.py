@@ -2,7 +2,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.models import User
-from .models import CashAccount, Friends, Portfolio, Purchase, Stock, StockHolding, StockPerformance, StockList, StockListItem,IsAccessibleBy
+from .models import CashAccount, Friends, Portfolio, Purchase, Stock, StockHolding, StockPerformance, StockList, StockListItem, StockListAccessibleBy, Review
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -41,6 +41,7 @@ class FriendsSerializer(serializers.ModelSerializer):
         model = Friends
         fields = ['id', 'receiver', 'requester', 'req_status', 'time_of_rejection', 'requester_username', 'receiver_username']
 
+
 class StockSerializer(serializers.ModelSerializer):
     class Meta:
         model = Stock
@@ -53,7 +54,7 @@ class StockPerformanceSerializer(serializers.ModelSerializer):
 
 
 class StockListSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)  # Nested serializer for User
+    user = UserSerializer(read_only=True)  
 
     class Meta:
         model = StockList
@@ -61,19 +62,17 @@ class StockListSerializer(serializers.ModelSerializer):
         
 
 class StockListItemSerializer(serializers.ModelSerializer):
-    slid = StockListSerializer(read_only=True)  # Nested serializer for StockList
-    symbol = StockSerializer(read_only=True)    # Nested serializer for Stock
-
+    slid = StockListSerializer(read_only=True)  
+    symbol = StockSerializer(read_only=True)   
     class Meta:
         model = StockListItem
         fields = ['slid', 'symbol', 'shares']
 
-class IsAccessibleBySerializer(serializers.ModelSerializer):
-    slid = StockListSerializer(read_only=True)  # Nested serializer for StockList
-    user = UserSerializer(read_only=True)        # Nested serializer for User
-
+class StockListAccessibleBySerializer(serializers.ModelSerializer):
+    Slid = StockListSerializer(read_only=True)  
+    user = UserSerializer(read_only=True)      
     class Meta:
-        model = IsAccessibleBy
+        model = StockListAccessibleBy
         fields = ['slid', 'user']
 
 class CashAccountSerializer(serializers.ModelSerializer):
@@ -94,14 +93,12 @@ class StockHoldingSerializer(serializers.ModelSerializer):
         fields = ['pid', 'symbol', 'shares_owned']
 
 
-
-# class HasAccountSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = HasAccount
-#         fields = ['pid', 'account']
-
 class PurchaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Purchase
         fields = ['purchase_id', 'timestamp', 'quantity', 'purchase_price', 'user', 'symbol']
     
+class ReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Review
+        fields = ['slid', 'uid', 'reviewText', 'reviewDate']

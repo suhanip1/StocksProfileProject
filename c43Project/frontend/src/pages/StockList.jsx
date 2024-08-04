@@ -68,11 +68,6 @@ function StockList() {
     navigate("/");
   };
 
-  const handleBack = () => {
-    console.log("Go back to Home Page");
-    navigate("/StockLists");
-  };
-
   const handleStockNavigation = (symbol, strikePrice) => {
     navigate(
       `/Stock?symbol=${symbol}&strikePrice=${strikePrice}&navigatePath=/StockList?slid=${slid}`
@@ -115,9 +110,6 @@ function StockList() {
         spacing={2}
         sx={{ display: "flex", justifyContent: "center", alignItems: "center" }}
       >
-        <Button variant="outlined" onClick={handleBack}>
-          Back to Stock List
-        </Button>
         <Button variant="outlined" onClick={handleHome}>
           Back to Home
         </Button>

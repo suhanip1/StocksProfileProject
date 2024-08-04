@@ -1,5 +1,4 @@
 import yfinance as yf
-import pandas as pd
 from datetime import date
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
@@ -22,6 +21,7 @@ class Command(BaseCommand):
             max_date = cursor.fetchone()[0]
 
             end_date = max_date
+
 
         self.fetch_and_store_data("SPY", start_date, end_date)
 

@@ -1,6 +1,10 @@
 import React from "react";
 import { Box, Container, Stack, Typography } from "@mui/material";
+import {
+  Button,
+} from '@mui/material';
 import { useState, useEffect } from "react";
+import { useNavigate } from 'react-router-dom';
 import "./friendsPage.css";
 import api from "../api";
 const FriendsPage = () => {
@@ -9,12 +13,12 @@ const FriendsPage = () => {
   const [pendingList, setPendingList] = useState([]);
   const [ourPendingList, setOurPendingList] = useState([]);
   const [user, setUser] = useState(null);
+  const navigate = useNavigate();
   const handleInputChange = (event) => {
     setFriendName(event.target.value);
   };
   const FindUser = async (username) => {
     try {
-      console.log(username, "blashdhshs");
       const res = await api.get(`find-username/?username=${username}`);
       //const response = await api.get(`find-user/${username}`,  {
       //  method: "GET",});
@@ -27,10 +31,14 @@ const FriendsPage = () => {
     }
   };
 
+  const handleHome = () => {
+    navigate("/");
+  };
+
+
   const handleSubmit = async () => {
     try {
       const user = await FindUser(friendName);
-      console.log(user.username);
       setUser(user.username);
     } catch (error) {
       alert("no such user");
@@ -58,7 +66,6 @@ const FriendsPage = () => {
     const friendList = await api.get("get-friends/", {
       method: "GET",
     });
-    console.log(friendList.data.friends);
     friendList && setFriendList(friendList.data.friends);
   };
 
@@ -72,7 +79,6 @@ const FriendsPage = () => {
     const friendList = await api.get("get-pending-friends/", {
       method: "GET",
     });
-    console.log("fndfnsfn", friendList.data);
     friendList && setPendingList(friendList.data);
   };
 
@@ -93,9 +99,14 @@ const FriendsPage = () => {
     getPendingReqs();
     getOurPendingReqs();
   }, []);
+  
 
   return (
     <div>
+      <Button style={{marginLeft: "20px",}} 
+      variant="outlined" onClick={handleHome}>
+        Back to Home
+      </Button>
       <div
         style={{
           display: "flex",

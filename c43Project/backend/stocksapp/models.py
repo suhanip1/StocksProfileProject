@@ -3,11 +3,33 @@ from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
+# CREATE TABLE User(
+# uid INT, 
+# fname VARCHAR(20), 
+# lname VARCHAR(20), 
+# username VARCHAR(30) UNIQUE, 
+# email VARCHAR(30) UNIQUE, 
+# password VARCHAR(15), 
+# dateJoined TIMESTAMP, 
+# PRIMARY KEY(uid));
+
+
 class Friends(models.Model):
-    # CREATE TABLE Friends(receiverId INT, requesterId INT, reqStatus VARCHAR(10), timeOfRejection TIMESTAMP DEFAULT NULL, 
-    # CHECK (reqStatus in ['accepted', 'requested', 'rejected']), PRIMARY KEY(receiverId, requesterId), 
-    # FOREIGN KEY (receiverId) REFERENCES Client(uid) ON DELETE CASCADE ON UPDATE CASCADE,
-    # FOREIGN KEY (requesterId) REFERENCES Client(uid) ON DELETE CASCADE ON UPDATE CASCADE);
+#     CREATE TABLE Friends(
+#     receiver_id INT,
+#     requester_id INT,
+#     req_status VARCHAR(10) DEFAULT 'pending',
+#     time_of_rejection TIMESTAMP DEFAULT NULL,
+#     CHECK (req_status IN ('accepted', 'pending', 'rejected')),
+#     PRIMARY KEY(receiver_id, requester_id),
+#     FOREIGN KEY (receiver_id) REFERENCES User(uid) ON DELETE   
+#      CASCADE ON UPDATE CASCADE,
+#     FOREIGN KEY (requester_id) REFERENCES Client(uid) ON DELETE 
+#      CASCADE ON UPDATE CASCADE,
+#     UNIQUE (requester_id, receiver_id),
+#     UNIQUE (receiver_id, requester_id)
+#  );
+
 
     PENDING = "Pending"
     ACCEPTED = "Accepted"
@@ -17,7 +39,6 @@ class Friends(models.Model):
         (ACCEPTED, 'Accepted'),
         (REJECTED, 'Rejected'),
     ]
-    
     receiver = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='receiver', on_delete=models.CASCADE)
     requester = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='sender', on_delete=models.CASCADE)
     req_status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
@@ -34,10 +55,6 @@ class Friends(models.Model):
             raise ValidationError('Friendship in the opposite direction already exists.')
         super().clean()
 
-class Bank_account(models.Model):
-    uid = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    balance = models.FloatField()
-from django.contrib.auth.models import User
 
 class Stock(models.Model):
     # CREATE TABLE Stock(symbol VARCHAR(5), strikePrice REAL, PRIMARY KEY(symbol);
@@ -46,8 +63,7 @@ class Stock(models.Model):
 
 class StockPerformance(models.Model):
     # CREATE TABLE StockPerformance(timestamp DATE, open REAL, high REAL, low REAL, 
-    # close REAL, volume INT, symbol VARCHAR(5), PRIMARY KEY(symbol, timestamp), 
-    # FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE CASCADE ON UPDATE CASCADE);;
+    # close REAL, volume INT, symbol VARCHAR(5), PRIMARY KEY(symbol, timestamp));
 
     timestamp = models.DateField()
     open = models.FloatField(null=True, blank=True)
@@ -55,7 +71,6 @@ class StockPerformance(models.Model):
     low = models.FloatField(null=True, blank=True)
     close = models.FloatField(null=True, blank=True)
     volume = models.IntegerField()
-    # symbol = models.ForeignKey(Stock, on_delete=models.SET_NULL, null=True)
     symbol = models.CharField(max_length=5)
 
     class Meta:
@@ -71,12 +86,12 @@ class StockList(models.Model):
     # CHECK (visibility IN ('private', 'public', 'Private', 'Public));";
 
     slid = models.AutoField(primary_key=True)
-    visibility = models.CharField(max_length=10, choices=[('private', 'Private'), ('public', 'Public')], default='private')
+    visibility = models.CharField(max_length=10, choices=[('private', 'Private'), ('public', 'Public'), ('shared', 'Shared')], default='private')
     sl_name = models.CharField(max_length=20)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
 
     def __str__(self):
-        return self.slname
+        return f"{self.slid}"
 
 class StockListItem(models.Model):
     # CREATE TABLE StockListItem(slid INT, symbol VARCHAR(5), shares INT, PRIMARY KEY(slid, symbol), 
@@ -92,11 +107,12 @@ class StockListItem(models.Model):
     def __str__(self):
         return f"{self.slid} - {self.symbol}"
 
-class IsAccessibleBy(models.Model):
-    # CREATE TABLE IsAccessibleBy(slid INT, uid INT, PRIMARY KEY(slid, uid),
+
+
+class StockListAccessibleBy(models.Model):
+    # CREATE TABLE StockListAccessibleBy(slid INT, uid INT, PRIMARY KEY(slid, uid),
     # FOREIGN KEY (uid) REFERENCES User(uid) ON DELETE SET NULL ON UPDATE CASCADE,
     # FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE CASCADE ON UPDATE CASCADE);
-
     slid = models.ForeignKey(StockList, on_delete=models.CASCADE)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
 
@@ -125,9 +141,9 @@ class Portfolio(models.Model):
         return self.pname
 
 class StockHolding(models.Model):
-    # "CREATE TABLE StockHoldings(pid INT, symbol VARCHAR(5), sharesOwned INT, PRIMARY KEY(pid, symbol),
+    # CREATE TABLE StockHoldings(pid INT, symbol VARCHAR(5), shares_owned INT, PRIMARY KEY(pid, symbol),
     # FOREIGN KEY (pid) REFERENCES Portfolio(pid) ON DELETE CASCADE ON UPDATE CASCADE,
-    # FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE CASCADE ON UPDATE CASCADE);"
+    # FOREIGN KEY (symbol) REFERENCES Stock(symbol) ON DELETE CASCADE ON UPDATE CASCADE);
 
     pid = models.ForeignKey(Portfolio, on_delete=models.CASCADE)
     symbol = models.ForeignKey(Stock, on_delete=models.CASCADE)
@@ -139,15 +155,6 @@ class StockHolding(models.Model):
     def __str__(self):
         return f"{self.pid} - {self.symbol}"
     
-
-
-
-# class HasAccount(models.Model):
-#     # CREATE TABLE HasAccount(pid INT, accId INT, PRIMARY KEY(pid), 
-#     # FOREIGN KEY (pid) REFERENCES Portfolio(pid) ON DELETE CASCADE ON UPDATE CASCADE,
-#     # FOREIGN KEY (accId) REFERENCES CashAccount(accId) ON DELETE CASCADE ON UPDATE CASCADE);
-#     pid = models.ForeignKey(Portfolio, on_delete=models.CASCADE)
-#     account = models.ForeignKey(CashAccount, on_delete=models.CASCADE)
 
 class Purchase(models.Model):
     # CREATE TABLE Purchase(purchaseId INT, timestamp TIMESTAMP, quantity INT, 
@@ -163,3 +170,19 @@ class Purchase(models.Model):
 
     def __str__(self):
         return f"Purchase(user={self.user}, symbol={self.symbol}, timestamp={self.timestamp})"
+
+
+class Review(models.Model):
+    #"CREATE TABLE Review(id INT, slid INT, uid INT, reviewText VARCHAR(4000), reviewDate TIMESTAMP, 
+    # PRIMARY KEY(id), FOREIGN KEY (slid) REFERENCES StockLists(slid) ON DELETE CASCADE ON UPDATE CASCADE, 
+    # FOREIGN KEY (uid) REFERENCES User(uid) ON DELETE CASCADE ON UPDATE CASCADE););";
+    slid = models.ForeignKey(StockList, on_delete=models.CASCADE)
+    uid = models.ForeignKey(User, on_delete=models.CASCADE)
+    reviewText = models.TextField(max_length=4000)
+    reviewDate = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('slid', 'uid')
+
+    def __str__(self):
+        return f"Review by {self.uid} on {self.slid}"

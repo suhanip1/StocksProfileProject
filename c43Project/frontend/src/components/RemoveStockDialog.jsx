@@ -40,17 +40,21 @@ function RemoveStock({
   const [price, setPrice] = React.useState(0);
   const [totalEarnings, setTotalEarnings] = React.useState(0);
 
+  //React.useEffect(() => {
+   // if (sell) {
+  //    getPrice();
+   // }
+  //}//, [symbol]);
+
   React.useEffect(() => {
     if (sell) {
       getPrice();
     }
-  }, []);
-
-  React.useEffect(() => {
     getTotalEarnings();
-  }, [shares]);
 
-  const getTotalEarnings = () => {
+  }, [shares, symbol, price]);
+
+  const getTotalEarnings =  () => {
     const earnings = shares * price;
     setTotalEarnings(earnings.toFixed(2));
   };
@@ -58,7 +62,6 @@ function RemoveStock({
   const getPrice = async () => {
     try {
       const response = await api.get(`strike-price/${symbol}/`);
-      console.log(response.data.strike_price);
       setPrice(response.data.strike_price);
     } catch (error) {
       console.error("Error getting strike price", error.response.data);
@@ -72,7 +75,6 @@ function RemoveStock({
           const response = await api.post(
             `remove-stock-list-item/${id}/${symbol}/${shares}/`
           );
-          console.log("Success:", response.data);
           setMessage(`Successfully removed ${shares} shares of ${symbol}!`);
           setSnackSeverity("success");
           setOpenSnackbar(true);
@@ -98,7 +100,6 @@ function RemoveStock({
           const response = await api.post(
             `sell-stock/${id}/${symbol}/${shares}/`
           );
-          console.log("Success:", response.data);
           setMessage(`Successfully sold ${shares} shares of ${symbol}!`);
           setSnackSeverity("success");
           setOpenSnackbar(true);
