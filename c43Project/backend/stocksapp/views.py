@@ -26,6 +26,8 @@ from django.core.cache import cache
 
 
 class SignupView(generics.CreateAPIView):
+    # INSERT INTO User(uid, fname, Iname, username, email, password, dateJoined) 
+    # VALUES (uid, fname, Iname, username, email, password, dateJoined)
     permission_classes = [AllowAny]
     def post(self, request):
         serializer = UserSerializer(data=request.data)
@@ -40,6 +42,7 @@ class SignupView(generics.CreateAPIView):
 
 @api_view(['GET'])
 def get_current_user(request):
+    # SELECT uid as user_id, CONCAT(first_name, ' ', last_name) AS user_name FROM User WHERE uid=request.user.id;
     user_id = request.user.id
     user_name = request.user.first_name + " " + request.user.last_name
     return Response({"user_id": user_id, "user_name": user_name})
@@ -60,12 +63,14 @@ def get_latest_date(request):
 
 @api_view(['GET'])
 def get_current_username(request):
+    # SELECT username FROM User WHERE uid=request.user.id;
     username = request.user.username
     return Response({"username": username})
 
 
 @api_view(['GET'])
 def find(request):
+    # SELECT * FROM User WHERE username=username;
     username = request.GET.get('username')
     user = get_object_or_404(User, username=username)
     serializer = UserSerializer(user)
@@ -73,6 +78,7 @@ def find(request):
 
 @api_view(['GET'])
 def find_user(request, username):
+    # SELECT * FROM User WHERE username=username;
     user = get_object_or_404(User, username=username)
     serializer = UserSerializer(user)
     return Response(serializer.data, status=status.HTTP_200_OK)
@@ -244,7 +250,9 @@ def predict_prices(request, symbol, pastInterval, futureInterval):
             # 1. get the dates we are calculating the predicted prices for
             # 2. get the returns for the given symbol and the returns for the index
             # 3. calculate the beta and average return of the given symbol
-            # 4. use (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) as formula for predicted prices
+            # 4. use (SELECT MAX(close) FROM stocksapp_stockperformance WHERE symbol = %s) * 
+            #           (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) as formula for predicted prices
+            # Adding 1 to the return converts the percentage change into a multiplicative factor.
             cursor.execute(f"""
             WITH RECURSIVE future_dates AS (
                 SELECT 
@@ -398,6 +406,7 @@ class StockListEditView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 class StockListDeleteView(APIView):
+    # DELETE FROM StockList WHERE slid=slid;
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, slid):
@@ -609,6 +618,7 @@ class PortfolioEditView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 class PortfolioDeleteView(APIView):
+    # DELETE FROM portfolio WHERE pid=pid;
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, pid):
@@ -971,6 +981,8 @@ class SellStockView(APIView):
 class DailyStockInformationView(generics.CreateAPIView):
     permission_classes = [AllowAny]
     def post(self, request):
+        #  INSERT INTO stocksapp_stockperformance (timestamp, open, high, low, close, volume, symbol) 
+        #  VALUES (timestamp, open, high, low, close, volume, symbol) ON CONFLICT (symbol, timestamp) DO NOTHING;
         serializer = StockPerformanceSerializer(data=request.data)
 
         if serializer.is_valid():
