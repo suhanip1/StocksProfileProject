@@ -411,6 +411,7 @@ class StockListDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, slid):
+        # DELETE FROM StockList WHERE slid=slid
         stock_list = get_object_or_404(StockList, pk=slid)
         stock_list.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -622,6 +623,7 @@ class PortfolioDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, pid):
+        # DELETE FROM Portfolio WHERE pid=pid;
         portfolio = get_object_or_404(Portfolio, pk=pid)
         portfolio.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -1505,7 +1507,7 @@ def create_stock_list_accessibility(request,slid,friend_username):
             #UPDATE StockListAccessibleBy
             #SET visibility = 'Shared'
            # WHERE slid =slid;
-            stocklist.visibility = "Shared"
+            stockList.visibility = "Shared"
             slid.save()
             return JsonResponse({"message": "shared stock list"}, status=201)
         else:
