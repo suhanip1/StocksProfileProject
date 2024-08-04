@@ -26,8 +26,6 @@ from django.core.cache import cache
 
 
 class SignupView(generics.CreateAPIView):
-    # INSERT INTO User(uid, fname, Iname, username, email, password, dateJoined) 
-    # VALUES (uid, fname, Iname, username, email, password, dateJoined)
     permission_classes = [AllowAny]
     def post(self, request):
         serializer = UserSerializer(data=request.data)
@@ -42,7 +40,6 @@ class SignupView(generics.CreateAPIView):
 
 @api_view(['GET'])
 def get_current_user(request):
-    # SELECT uid as user_id, CONCAT(first_name, ' ', last_name) AS user_name FROM User WHERE uid=request.user.id;
     user_id = request.user.id
     user_name = request.user.first_name + " " + request.user.last_name
     return Response({"user_id": user_id, "user_name": user_name})
@@ -63,14 +60,12 @@ def get_latest_date(request):
 
 @api_view(['GET'])
 def get_current_username(request):
-    # SELECT username FROM User WHERE uid=request.user.id;
     username = request.user.username
     return Response({"username": username})
 
 
 @api_view(['GET'])
 def find(request):
-    # SELECT * FROM User WHERE username=username;
     username = request.GET.get('username')
     user = get_object_or_404(User, username=username)
     serializer = UserSerializer(user)
@@ -78,7 +73,6 @@ def find(request):
 
 @api_view(['GET'])
 def find_user(request, username):
-    # SELECT * FROM User WHERE username=username;
     user = get_object_or_404(User, username=username)
     serializer = UserSerializer(user)
     return Response(serializer.data, status=status.HTTP_200_OK)
@@ -133,8 +127,18 @@ def send_friend_request(request, username):
             return Response({'message': f'Please wait {int(minutes_remaining)} minutes.'})
         return Response({'message': 'Duplicate friend request.'})
 
+
+
 @api_view(['PUT'])
 def remove_friend(request, username):
+    #WITH friend AS ( SELECT * FROM Friends
+                         #WHERE (receiver_id = (SELECT uid FROM "User" WHERE username = 'request_user') 
+                         #AND requester_id = (SELECT uid FROM "User" WHERE username = 'target_username')) 
+                         #OR (receiver_id = (SELECT uid FROM "User" WHERE username = 'target_username') 
+                         #AND requester_id = (SELECT uid FROM "User" WHERE username = 'request_user')) ) 
+                         #UPDATE Friends SET req_status = 'rejected', time_of_rejection = NOW() 
+                         #FROM friend WHERE Friends.receiver_id = friend.receiver_id AND Friends.requester_id = friend.requester_id 
+                         #AND Friends.req_status != 'rejected';
     friend = Friends.objects.filter(receiver=request.user, requester__username=username) | Friends.objects.filter(receiver__username=username, requester=request.user)
     friend = friend.first()
     if friend:
@@ -250,9 +254,7 @@ def predict_prices(request, symbol, pastInterval, futureInterval):
             # 1. get the dates we are calculating the predicted prices for
             # 2. get the returns for the given symbol and the returns for the index
             # 3. calculate the beta and average return of the given symbol
-            # 4. use (SELECT MAX(close) FROM stocksapp_stockperformance WHERE symbol = %s) * 
-            #           (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) as formula for predicted prices
-            # Adding 1 to the return converts the percentage change into a multiplicative factor.
+            # 4. use (1 + (a.avg_return * b.beta) * (ROW_NUMBER() OVER (ORDER BY f.timestamp))) as formula for predicted prices
             cursor.execute(f"""
             WITH RECURSIVE future_dates AS (
                 SELECT 
@@ -406,7 +408,6 @@ class StockListEditView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 class StockListDeleteView(APIView):
-    # DELETE FROM StockList WHERE slid=slid;
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, slid):
@@ -618,7 +619,6 @@ class PortfolioEditView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 class PortfolioDeleteView(APIView):
-    # DELETE FROM portfolio WHERE pid=pid;
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, pid):
@@ -981,8 +981,6 @@ class SellStockView(APIView):
 class DailyStockInformationView(generics.CreateAPIView):
     permission_classes = [AllowAny]
     def post(self, request):
-        #  INSERT INTO stocksapp_stockperformance (timestamp, open, high, low, close, volume, symbol) 
-        #  VALUES (timestamp, open, high, low, close, volume, symbol) ON CONFLICT (symbol, timestamp) DO NOTHING;
         serializer = StockPerformanceSerializer(data=request.data)
 
         if serializer.is_valid():
@@ -1476,13 +1474,27 @@ def create_stock_list_accessibility(request,slid,friend_username):
          return JsonResponse({"message": "cannot share with yourself"})
 
     try:
+       
         friend = User.objects.get(username=friend_username)
-        slid = StockList.objects.get(slid=slid)
+        #SELECT * FROM StockListAccessibleBy WHERE slid = slid
+        stockList = StockList.objects.get(slid=slid)
+        
+        #WITH friends AS ( SELECT * FROM Friends WHERE req_status = 'accepted' AND 
+        #((receiver_id = (SELECT uid FROM "User" WHERE username = 'request_user') AND 
+        #requester_id = (SELECT uid FROM "User" WHERE username = 'friend_username')) OR 
+        #(requester_id = (SELECT uid FROM "User" WHERE username = 'request_user') AND 
+        #receiver_id = (SELECT uid FROM "User" WHERE username = 'friend_username'))))
 
         friends = Friends.objects.filter(req_status=Friends.ACCEPTED, receiver=request.user, requester=friend) | Friends.objects.filter(req_status=Friends.ACCEPTED, requester=request.user, receiver=friend)
 
         if len(friends) == 0:
             return JsonResponse({"message": "can only share with friends"})
+
+        # check if the user has access 
+        # WITH accessibille (SELECT * FROM StockListAccessibleBy WHERE slid = slid  AND user_id = userid)
+        # create the relationship
+        #INSERT INTO  StockListAccessibleBy(slid, uid) (SELECT slid ASslid, uid  FROM Friends 
+        # WHERE (receiverId = Current_userId OR requesterId = Current_userId) AND reqStatus = “accepted”);
             
         relationship, created = StockListAccessibleBy.objects.get_or_create(
             slid = slid,
@@ -1490,7 +1502,10 @@ def create_stock_list_accessibility(request,slid,friend_username):
         )
 
         if created:
-            slid.visibility = "Shared"
+            #UPDATE StockListAccessibleBy
+            #SET visibility = 'Shared'
+           # WHERE slid =slid;
+            stocklist.visibility = "Shared"
             slid.save()
             return JsonResponse({"message": "shared stock list"}, status=201)
         else:
@@ -1502,11 +1517,17 @@ def create_stock_list_accessibility(request,slid,friend_username):
 
 @api_view(['GET'])
 def get_all_stockLists_shared(request):
-    
+
+    #WITH shared_stock_lists AS ( SELECT slid FROM StockListAccessibleBy WHERE user_id = request.user.id SELECT * FROM StockList WHERE slid = slid;
     shared_stock_lists = StockListAccessibleBy.objects.filter(user=request.user)
-    
+
+    #WITH shared_stock_lists AS (
+    #SELECT slid 
+    #FROM StockListAccessibleBy 
+   # WHERE user_id = request.user.id);
     stock_list_ids = list(shared_stock_lists.values_list('slid', flat=True))
-    
+
+    #SELECT * FROM StockList WHERE slid IN (SELECT slid FROM shared_stock_lists);
     stock_list_items = StockList.objects.filter(slid__in=stock_list_ids)
     
     serializer = StockListSerializer(stock_list_items, many=True)
